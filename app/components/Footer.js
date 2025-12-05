@@ -6,12 +6,12 @@ const Footer = () => {
             <div className="text-center text-sm text-gray-500">
                 &copy; {new Date().getFullYear()}{' '}
                 <a
-                    href="https://buttnetworks.com"
+                    href="https://wahb.space"
                     target="_blank"
                     rel="noopener noreferrer"
                     className="font-semibold text-blue-600 hover:text-blue-800 hover:underline transition-colors duration-200"
                 >
-                    ButtNetworks
+                    Wahb.space
                 </a>
             </div>
         </footer>

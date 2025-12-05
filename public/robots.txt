@@ -1,0 +1,9 @@
+# *
+User-agent: *
+Allow: /
+
+# Host
+Host: https://wahb.space
+
+# Sitemaps
+Sitemap: https://wahb.space/sitemap.xml
