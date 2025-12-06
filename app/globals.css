@@ -24,3 +24,49 @@ body {
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
+
+/*
+  This CSS sets a thin, modern, light-themed scrollbar globally 
+  for improved aesthetics in Webkit browsers (Chrome, Edge, Safari) 
+  and Firefox.
+*/
+
+/* 1. Webkit Browsers (Chrome, Edge, Safari) */
+
+/* Targets the scrollbar size for the main body and all elements */
+::-webkit-scrollbar {
+  width: 8px; /* Vertical scrollbar width */
+  height: 8px; /* Horizontal scrollbar height */
+}
+
+/* Scrollbar Track (the background path) */
+::-webkit-scrollbar-track {
+  background: #f1f1f1; /* Very light gray/off-white track */
+  border-radius: 4px;
+}
+
+/* Scrollbar Handle (the part you drag) */
+::-webkit-scrollbar-thumb {
+  background-color: #c0c0c0; /* Light gray handle */
+  border-radius: 4px;
+}
+
+/* Handle on hover for better user feedback */
+::-webkit-scrollbar-thumb:hover {
+  background-color: #a0a0a0; /* Slightly darker gray on hover */
+}
+
+/* 2. Firefox Support */
+
+/* Targets the scrollbar for the body and all scrollable elements */
+* {
+  /* Set width to thin */
+  scrollbar-width: thin;
+  /* Set color: <thumb-color> <track-color> */
+  scrollbar-color: #c0c0c0 #f1f1f1;
+}
+
+/* Optional: Smooth Scrolling */
+html {
+  scroll-behavior: smooth;
+}
