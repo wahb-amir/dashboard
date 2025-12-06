@@ -3,6 +3,7 @@ import jwt from "jsonwebtoken";
 const APP_SECRET = process.env.JWT_SECRET_APP;
 const AUTH_SECRET = process.env.JWT_SECRET_AUTH;
 const INTERAL_SECRET = process.env.JWT_INTERNAL_SECRET;
+
 const AUTH_EXPIRES_IN_APP = process.env.JWT_AUTH_EXPIRES_IN_APP || "1h";
 const origin = process.env.ORIGIN;
 

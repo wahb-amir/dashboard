@@ -49,77 +49,65 @@ export async function GET(request) {
 
 export async function POST(request) {
   try {
-    const authHeader = request.headers.get("authorization");
+    const authHeader = request.headers.get("authorization") || request.headers.get("Authorization");
     if (!authHeader || !authHeader.startsWith("Bearer ")) {
       return NextResponse.json({ ok: false, message: "No auth token provided." }, { status: 401 });
     }
-
     const token = authHeader.split(" ")[1];
     const decode = validateInternalToken(token);
-    if (!decode) {
+    if (!decode || !decode.uid) {
       return NextResponse.json({ ok: false, message: "Invalid or expired auth token." }, { status: 401 });
     }
 
-    if (decode.origin !== process.env.ORIGIN) {
+    if (decode.origin && process.env.ORIGIN && decode.origin !== process.env.ORIGIN) {
       return NextResponse.json({ ok: false, message: "Invalid token origin." }, { status: 401 });
     }
 
-    const body = await request.json();
-    // minimal validation
-    const {
-      projectTitle: title,
-      company,
-      dueDate,
-      email,
-      contactName: name,
-      steps = []
-    } = body || {};
+    // Parse JSON body
+    const body = await request.json().catch(() => null);
+    if (!body) return NextResponse.json({ ok: false, message: "Invalid JSON body." }, { status: 400 });
 
-    if (!title) {
+    const { projectTitle: title, company, dueDate, email, contactName: name, steps = [] } = body;
+    if (!title || typeof title !== "string" || !title.trim()) {
       return NextResponse.json({ ok: false, message: "Missing projectTitle." }, { status: 400 });
     }
 
     const { db } = await connectToDatabase();
     const userId = decode.uid;
-
-
     const now = new Date();
 
+    // Initial step if none provided
     const initialStep = {
       id: uuidv4(),
       step: "Project Created",
-      date: now.toLocaleDateString('en-US', {
-        weekday: 'long',
-        year: 'numeric',
-        month: 'long',
-        day: 'numeric'
-      }),
+      date: now.toLocaleDateString("en-US", { weekday: "long", year: "numeric", month: "long", day: "numeric" }),
       status: "Completed",
       notes: `Project created by ${name || "Unknown"}`,
       createdBy: userId,
-      createdAt: now.toISOString(),
+      updatedBy: name || "",
+      createdAt: now.toISOString()
     };
 
-
-    // if client provided steps, sanitize and add ids/createdBy/createdAt for each
     const sanitizedSteps = Array.isArray(steps) && steps.length > 0
-      ? steps.map(s => ({
-        id: s.id || uuidv4(),
-        step: s.step || "step",
-        data: s.data || {},
-        status: s.status || "pending",
-        notes: s.notes || "",
-        createdBy: userId,
-        createdAt: s.createdAt || now.toISOString()
+      ? steps.map((s) => ({
+        id: s?.id || uuidv4(),
+        step: s?.step || "Step",
+        data: s?.data || {},
+        status: s?.status || "pending",
+        notes: s?.notes || "",
+        createdBy: s?.createdBy || userId,
+        createdAt: s?.createdAt || now.toISOString()
       }))
       : [initialStep];
+
     const developers = [
       { name: "Wahb", portfolio: "https://wahb.space" },
       { name: "Shahnawaz", portfolio: "https://shahnawaz.buttnetworks.com" }
     ];
+
     const projectDocument = {
-      userId, // keep as string unless converting to ObjectId
-      title,
+      userId,
+      title: title.trim(),
       company: company || null,
       dueDate: dueDate ? new Date(dueDate) : null,
       email: email || null,
@@ -127,18 +115,30 @@ export async function POST(request) {
       steps: sanitizedSteps,
       currentFocus: "New quote request received.",
       status: "pending",
-      developers: developers?.map(dev => ({
-        name: dev.name,
-        portfolio: dev.portfolio || null
-      })) || [],
-
+      developers: developers.map(d => ({ name: d.name, portfolio: d.portfolio || null })),
       createdAt: now,
       updatedAt: now,
+      versions: [
+        {
+          versionId: uuidv4(),
+          snapshot: {
+            title: title.trim(),
+            company: company || null,
+            dueDate: dueDate ? new Date(dueDate) : null,
+            email: email || null,
+            contactName: name || null,
+            steps: sanitizedSteps,
+            developers: developers.map(d => ({ name: d.name, portfolio: d.portfolio || null })),
+            status: "pending",
+            currentFocus: "New quote request received."
+          },
+          createdAt: now.toISOString(),
+          createdBy: userId
+        }
+      ]
     };
 
-
     const insertResult = await db.collection("projects").insertOne(projectDocument);
-
     if (!insertResult.insertedId) {
       throw new Error("Failed to insert project document.");
     }
@@ -150,7 +150,7 @@ export async function POST(request) {
 
     return NextResponse.json({ ok: true, message: "Project saved successfully.", project: newProject }, { status: 201 });
   } catch (err) {
-    console.error("❌ Error in POST:", err);
+    console.error("❌ Error in POST /api/project:", err);
     return NextResponse.json({ ok: false, message: "Internal Server Error" }, { status: 500 });
   }
 }

@@ -7,21 +7,17 @@ const updateProject = async (payload, uid) => {
   try {
     // Generate token for internal service communication
     const internalToken = generateInternalToken(uid);
-
     // Call the internal /api/project route to save the data
+
     const response = await axios.post(`${process.env.ORIGIN}/api/project`, payload, {
       headers: {
         'Authorization': `Bearer ${internalToken}`,
-        // Must set Content-Type as JSON for the receiving endpoint
         'Content-Type': 'application/json'
       }
     });
-
-    // The /api/project route returns { ok: true, project: newProject }
     return response.data;
   } catch (err) {
     console.error('❌ Error saving project internally:', err.message);
-    // Re-throw the error so it can be caught and handled in the main POST function
     throw err;
   }
 }
@@ -99,13 +95,9 @@ export async function POST(request) {
       html: htmlBody,
       attachments,
     });
-
-    // --- 5. Save Project Internally and Capture Result ---
-    // The entries object is already correctly structured to be sent as JSON body to /api/project
-    // updateProject returns { ok: true, message: ..., project: newProject }
     const projectSaveResult = await updateProject(entries, uid);
 
-    // Ensure the internal project save was successful and we got a project object back
+
     if (!projectSaveResult.ok || !projectSaveResult.project) {
       throw new Error(projectSaveResult.message || "Failed to save project internally.");
     }

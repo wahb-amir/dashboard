@@ -70,6 +70,11 @@ const ProjectTimeline = ({ project }) => {
                             <p className={`text-xs font-semibold uppercase tracking-wider ${getStatusColor(item.status)}`}>{item.status}</p>
                             <h4 className="text-lg font-semibold text-gray-900 mt-1">{item.step}</h4>
                             <p className="text-sm text-gray-500 mt-0.5">Date: {item.date}</p>
+                            {item.updatedBy && (
+                                <p className="text-sm text-gray-600 mt-0.5 italic">
+                                    Updated by: <span className="font-medium">{item.updatedBy}</span>
+                                </p>
+                            )}
                             {item.notes && <p className="text-sm text-gray-700 mt-2 border-l-4 border-blue-400 pl-3 py-1 bg-blue-50 rounded-r-lg">{item.notes}</p>}
                         </div>
                     </motion.div>
