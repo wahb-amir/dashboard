@@ -11,7 +11,6 @@ const eslintConfig = defineConfig([
     "next-env.d.ts",
   ]),
   {
-    // Add custom rules
     rules: {
       "react/no-unescaped-entities": "off",
     },

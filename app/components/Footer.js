@@ -12,7 +12,7 @@ const Footer = () => {
                     rel="noopener noreferrer"
                     className="font-semibold text-blue-600 hover:text-blue-800 hover:underline transition-colors duration-200"
                 >
-                    wahb.space&trade;
+                    wahb.space
                 </a>
             </div>
         </footer>
