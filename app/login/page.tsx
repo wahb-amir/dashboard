@@ -1,29 +1,38 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import toast, { Toaster } from "react-hot-toast";
 import FloatingLabel from "../components/ui/FloatingLabel";
+
 type FormState = {
   email: string;
   password: string;
-  remember: boolean;
 };
+
+const APP_TOKEN_URL = "/api/auth/app_token";
+const MAX_RETRIES = 3;
 
 export default function LoginPage() {
   const router = useRouter();
-  const [form, setForm] = useState<FormState>({
-    email: "",
-    password: "",
-    remember: false,
-  });
+  const [form, setForm] = useState<FormState>({ email: "", password: "" });
   const [showPassword, setShowPassword] = useState(false);
   const [errors, setErrors] = useState<{ email?: string; password?: string }>(
     {}
   );
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(false); // signing in
   const [serverError, setServerError] = useState<string | null>(null);
 
+  // App token state + loading
+  const [appToken, setAppToken] = useState<string | null>(() =>
+    typeof window !== "undefined" ? sessionStorage.getItem("appToken") : null
+  );
+  const [loadingApp, setLoadingApp] = useState<boolean>(() =>
+    appToken ? false : true
+  );
+
+  // validation
   function validate(): boolean {
     const e: { email?: string; password?: string } = {};
     if (!form.email.trim()) e.email = "Email is required";
@@ -38,26 +47,174 @@ export default function LoginPage() {
     return Object.keys(e).length === 0;
   }
 
-  async function handleSubmit(e: React.FormEvent) {
+  // fetch app token with retry logic and store in sessionStorage
+  useEffect(() => {
+    let mounted = true;
+
+    // if token already in sessionStorage, use it and skip fetch
+    const existing =
+      typeof window !== "undefined" ? sessionStorage.getItem("appToken") : null;
+    if (existing) {
+      setAppToken(existing);
+      setLoadingApp(false);
+      return;
+    }
+
+    async function fetchAppTokenWithRetry() {
+      setLoadingApp(true);
+
+      for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+        try {
+          if (!mounted) return;
+
+          if (attempt === 0) {
+            toast.loading("Fetching app token...", { id: "app-token" });
+          } else {
+            toast.loading(`Retrying app token (attempt ${attempt + 1})`, {
+              id: "app-token",
+            });
+            // backoff (exponential-ish)
+            await new Promise((r) => setTimeout(r, Math.pow(2, attempt) * 250));
+          }
+
+          const res = await fetch(APP_TOKEN_URL, {
+            method: "GET",
+            credentials: "same-origin",
+            headers: { "Content-Type": "application/json" },
+          });
+
+          if (!res.ok) {
+            const text = await res.text().catch(() => "");
+            throw new Error(`Status ${res.status} ${text}`);
+          }
+
+          const data = await res.json().catch(() => null);
+          if (!data || !data.token) throw new Error("Invalid token response");
+
+          if (!mounted) return;
+          sessionStorage.setItem("appToken", data.token);
+          setAppToken(data.token);
+          toast.dismiss("app-token");
+          toast.success("Ready");
+          setLoadingApp(false);
+          return;
+        } catch (err) {
+          console.error("App token fetch error:", err);
+          // if last attempt, show error toast and stop
+          if (attempt === MAX_RETRIES - 1) {
+            toast.dismiss("app-token");
+            toast.error("Failed to fetch app token. Please try again later.");
+            if (!mounted) return;
+            setLoadingApp(false);
+            setAppToken(null);
+            return;
+          }
+          // else loop to retry
+        }
+      }
+    }
+
+    fetchAppTokenWithRetry();
+
+    return () => {
+      mounted = false;
+      toast.dismiss("app-token");
+    };
+  }, []);
+
+  async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setServerError(null);
 
+    const email = form.email.trim();
+    const password = form.password;
+
     if (!validate()) return;
 
+    // ensure we have appToken (first check state then sessionStorage)
+    let token =
+      appToken ??
+      (typeof window !== "undefined"
+        ? sessionStorage.getItem("appToken")
+        : null);
+    if (!token) {
+      toast.error("App is not ready. Please wait and try again.");
+      return;
+    }
+
     setLoading(true);
+    const toastId = toast.loading("Signing in…");
     try {
-      // Replace with real auth request
-      await new Promise((res) => setTimeout(res, 700));
-      router.push("/dashboard");
-    } catch (err) {
-      setServerError("Failed to sign in. Please try again.");
+      const response = await fetch("/api/auth/login", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-app-token": token,
+        },
+        body: JSON.stringify({ email, password }),
+        credentials: "same-origin",
+      });
+
+      type ApiResponse = {
+        token?: string;
+        success?: boolean;
+        message?: string;
+        error?: string;
+      };
+
+      let data: ApiResponse | null = null;
+
+      try {
+        data = (await response.json()) as ApiResponse;
+      } catch {
+        data = null;
+      }
+
+      // ❌ HTTP-level failure
+      if (!response.ok) {
+        throw new Error(
+          data?.error ??
+            data?.message ??
+            `Login failed (status ${response.status}). Please check credentials.`
+        );
+      }
+
+      // ❌ No/invalid body
+      if (!data) {
+        throw new Error("Invalid response from server");
+      }
+
+      // ✅ Success
+      if (data.token || data.success) {
+        toast.success("Signed in successfully!");
+        router.push("/dashboard");
+        return;
+      }
+
+      // ❌ Logical failure
+      throw new Error(data.message ?? "Invalid email or password");
+    } catch (err: unknown) {
+      console.error("Login error:", err);
+
+      const message =
+        err instanceof Error
+          ? err.message
+          : "Failed to sign in. Please try again.";
+
+      setServerError(message);
+      toast.error(message);
     } finally {
+      toast.dismiss(toastId);
       setLoading(false);
     }
   }
 
+  const formDisabled = loadingApp || loading;
+
   return (
     <div className="min-h-screen bg-gray-50 text-gray-800 antialiased">
+      <Toaster position="top-right" />
+
       <main className="flex-1 flex items-center justify-center py-12 px-4">
         <div className="w-full max-w-4xl">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-8 items-center">
@@ -125,7 +282,45 @@ export default function LoginPage() {
 
             {/* right: form */}
             <section className="order-1 md:order-2">
-              <div className="bg-white rounded-2xl shadow-md border border-gray-100 p-6 sm:p-8">
+              <div
+                className={`relative bg-white rounded-2xl shadow-md border border-gray-100 p-6 sm:p-8 transition-opacity ${
+                  formDisabled
+                    ? "opacity-60 pointer-events-none"
+                    : "opacity-100"
+                }`}
+                aria-busy={formDisabled}
+              >
+                {/* loading overlay when fetching app token */}
+                {loadingApp && (
+                  <div className="absolute inset-0 z-10 flex items-center justify-center">
+                    <div className="flex flex-col items-center gap-3">
+                      <svg
+                        className="w-10 h-10 animate-spin text-gray-400"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        aria-hidden
+                      >
+                        <circle
+                          className="opacity-25"
+                          cx="12"
+                          cy="12"
+                          r="10"
+                          stroke="currentColor"
+                          strokeWidth="4"
+                        />
+                        <path
+                          className="opacity-75"
+                          fill="currentColor"
+                          d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"
+                        />
+                      </svg>
+                      <div className="text-sm text-gray-600">
+                        Preparing secure connection…
+                      </div>
+                    </div>
+                  </div>
+                )}
+
                 <div className="mb-6">
                   <h1 className="text-lg md:text-2xl font-semibold text-gray-900">
                     Sign in to your account
@@ -142,9 +337,7 @@ export default function LoginPage() {
                 )}
 
                 <form onSubmit={handleSubmit} noValidate>
-                  {/* Grouped inputs with responsive vertical spacing */}
                   <div className="space-y-4 md:space-y-6">
-                    {/* Email (floating) */}
                     <FloatingLabel
                       id="email"
                       label="Email"
@@ -157,7 +350,6 @@ export default function LoginPage() {
                       autoComplete="email"
                     />
 
-                    {/* Password (floating) with trailing eye button */}
                     <FloatingLabel
                       id="password"
                       label="Password"
@@ -226,18 +418,6 @@ export default function LoginPage() {
                   </div>
 
                   <div className="flex items-center justify-between mb-6 mt-6">
-                    <label className="inline-flex items-center text-sm text-gray-700">
-                      <input
-                        type="checkbox"
-                        checked={form.remember}
-                        onChange={(e) =>
-                          setForm((s) => ({ ...s, remember: e.target.checked }))
-                        }
-                        className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-400"
-                      />
-                      <span className="ml-2">Remember me</span>
-                    </label>
-
                     <Link
                       href="/forgot"
                       className="text-sm text-blue-600 hover:underline"
@@ -248,7 +428,7 @@ export default function LoginPage() {
 
                   <button
                     type="submit"
-                    disabled={loading}
+                    disabled={formDisabled}
                     className="w-full inline-flex items-center justify-center gap-2 px-4 py-3 bg-blue-600 text-white font-semibold rounded-lg hover:bg-blue-700 disabled:opacity-60"
                   >
                     {loading ? (

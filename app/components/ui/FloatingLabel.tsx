@@ -6,7 +6,7 @@ function FloatingLabel({
   onChange,
   error,
   autoComplete,
-  trailing, 
+  trailing,
 }: {
   id: string;
   label: string;
@@ -31,11 +31,11 @@ function FloatingLabel({
           onChange={onChange}
           autoComplete={autoComplete}
           placeholder=" "
-          className="peer h-6 w-full bg-transparent placeholder-transparent text-sm outline-none"
+          className="peer h-6 w-full bg-transparent placeholder-transparent text-sm outline-none text-black"
         />
         <label
           htmlFor={id}
-          className={`absolute left-3 -top-2.5 bg-white px-1 text-xs text-gray-500
+          className={`absolute left-3 -top-2.5 bg-white px-1 text-xs
   transition-all duration-150 ease-in-out
   peer-placeholder-shown:top-3
   peer-placeholder-shown:text-sm
@@ -43,7 +43,7 @@ function FloatingLabel({
   peer-focus:-top-2.5
   peer-focus:text-xs
   peer-focus:text-blue-600
-  peer-focus:font-semibold`}
+  peer-focus:font-semibold text-black`}
         >
           {label}
         </label>
