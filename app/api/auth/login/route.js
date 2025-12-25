@@ -38,7 +38,7 @@ export async function POST(request) {
         if (!user) {
             await redis.incr(key);
             await redis.expire(key, BLOCK_TIME);
-            return Response.json({ error: "Invalid credentials" }, { status: 401 });
+            return Response.json({ error: "User not found" }, { status: 401 });
         }
 
         const ok = await verifyPassword(password, user.password);
@@ -61,7 +61,7 @@ export async function POST(request) {
         // create a response instance, set cookies on that instance, then return it
         let res = Response.json({
             message: "Login successful",
-            token: clientAuthToken, // returning the new auth token (you can change to authToken if that's intentional)
+            token: clientAuthToken, // returning the new auth token 
             user: {
                 id: user._id.toString(),
                 name: user.name || null,
