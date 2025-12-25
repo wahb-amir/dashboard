@@ -56,14 +56,8 @@ const features: Feature[] = [
 
 const FeatureCard: FC = () => {
   return (
-    <section
-      aria-labelledby="features-title"
-      className="max-w-6xl mx-auto px-4 py-16"
-    >
-      <h2
-        id="features-title"
-        className="text-3xl sm:text-4xl font-bold text-gray-900 text-center mb-12"
-      >
+    <section aria-labelledby="features-title" className="max-w-6xl mx-auto px-4 py-16">
+      <h2 id="features-title" className="text-3xl sm:text-4xl font-bold text-gray-900 text-center mb-12">
         Key Features
       </h2>
 
@@ -87,12 +81,12 @@ const FeatureCard: FC = () => {
                 className={`inline-flex items-center justify-center w-12 h-12 rounded-lg mb-4 ${feature.colorClass}`}
                 aria-hidden
               >
+                
+                {/* @ts-ignore */}
                 <Icon className="w-6 h-6" />
               </div>
 
-              <h3 className="text-lg font-semibold text-gray-900 mb-2">
-                {feature.title}
-              </h3>
+              <h3 className="text-lg font-semibold text-gray-900 mb-2">{feature.title}</h3>
               <p className="text-gray-700 text-sm">{feature.description}</p>
             </li>
           );

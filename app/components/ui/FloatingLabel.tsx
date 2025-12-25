@@ -6,6 +6,7 @@ function FloatingLabel({
   onChange,
   error,
   autoComplete,
+  trailing, // new prop
 }: {
   id: string;
   label: string;
@@ -14,13 +15,14 @@ function FloatingLabel({
   onChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
   error?: string;
   autoComplete?: string;
+  trailing?: React.ReactNode; // optional trailing element
 }) {
   return (
     <div className="relative">
       <div
         className={`relative rounded-md border ${
           error ? "border-red-300" : "border-gray-200"
-        } bg-white px-3 py-2 transition-colors focus-within:border-blue-600`}
+        } bg-white px-3 py-2 transition-colors focus-within:border-blue-600 flex items-center`}
       >
         <input
           id={id}
@@ -45,6 +47,7 @@ function FloatingLabel({
         >
           {label}
         </label>
+        {trailing && <div className="ml-2">{trailing}</div>}{" "}
       </div>
       {error && <p className="mt-2 text-xs text-red-600">{error}</p>}
     </div>
