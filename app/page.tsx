@@ -18,7 +18,7 @@ const Page = () => {
                   Effortless Client & Developer Collaboration
                 </h1>
                 <p className="mx-auto max-w-[700px] text-gray-600 md:text-xl">
-                  CollabHub replaces fragmented emails and chats with a single
+                  Replaces fragmented emails and chats with a single
                   platform for quotes, messaging, and automated progress
                   reporting.
                 </p>

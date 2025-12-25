@@ -6,7 +6,7 @@ function FloatingLabel({
   onChange,
   error,
   autoComplete,
-  trailing, // new prop
+  trailing, 
 }: {
   id: string;
   label: string;

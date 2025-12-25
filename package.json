@@ -28,6 +28,7 @@
     "react-dom": "19.2.0",
     "react-feather": "^2.0.10",
     "react-hot-toast": "^2.6.0",
+    "react-icons": "^5.5.0",
     "react-phone-input-2": "^2.15.1",
     "uuid": "^13.0.0",
     "validator": "^13.15.26"
