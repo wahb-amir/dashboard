@@ -2,11 +2,12 @@ import React from "react";
 
 import Link from "next/link";
 import FeatureCard from "./components/FeatureCard";
-const Page = () => {
+import { checkAuth } from "./utils/checkAuth";
+
+const Page = async () => {
+  const auth = await checkAuth();
   return (
     <div className="flex flex-col min-h-screen bg-white text-gray-800">
-     
-
       {/* Hero Section */}
       <main className="flex-1">
         <section className="py-20 md:py-32 lg:py-40 bg-white">
@@ -17,17 +18,16 @@ const Page = () => {
                 <h1 className="text-4xl sm:text-5xl md:text-6xl lg:text-7xl font-bold tracking-tight text-gray-900 font-headline">
                   Effortless Client & Developer Collaboration
                 </h1>
-                <p className="mx-auto max-w-[700px] text-gray-600 md:text-xl">
-                  Replaces fragmented emails and chats with a single
-                  platform for quotes, messaging, and automated progress
-                  reporting.
+                <p className="mx-auto max-w-175 text-gray-600 md:text-xl">
+                  Replaces fragmented emails and chats with a single platform
+                  for quotes, messaging, and automated progress reporting.
                 </p>
               </div>
 
               {/* CTA Buttons */}
               <div className="flex flex-col gap-3 sm:flex-row sm:gap-4 mt-4">
                 <Link
-                  href="/dashboard"
+                  href={auth ? "/dashboard" : "/login"}
                   className="px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-md shadow-md transition"
                 >
                   Get Started

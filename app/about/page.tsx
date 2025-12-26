@@ -9,7 +9,6 @@ import {
   Briefcase,
   BarChart,
 } from "lucide-react";
-import Logo from "@/app/components/ui/Logo";
 import { FaGithub } from "react-icons/fa";
 type IconComponent = React.ComponentType<React.SVGProps<SVGSVGElement>>;
 

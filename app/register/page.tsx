@@ -220,8 +220,8 @@ export default function SignupPagePlain() {
 
       // ✅ Success
       if (data.token || data.success) {
-        toast.success("Account created — welcome 🎉");
-        router.push("/dashboard");
+        toast.success("Account created — welcome ");
+        window.location.href = "/dashboard";
         return;
       }
 

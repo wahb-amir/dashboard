@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import toast, { Toaster } from "react-hot-toast";
 import FloatingLabel from "../components/ui/FloatingLabel";
+import { useSearchParams } from "next/navigation";
 
 type FormState = {
   email: string;
@@ -23,7 +24,7 @@ export default function LoginPage() {
   );
   const [loading, setLoading] = useState(false); // signing in
   const [serverError, setServerError] = useState<string | null>(null);
-
+  const params = useSearchParams();
   // App token state + loading
   const [appToken, setAppToken] = useState<string | null>(() =>
     typeof window !== "undefined" ? sessionStorage.getItem("appToken") : null
@@ -31,7 +32,12 @@ export default function LoginPage() {
   const [loadingApp, setLoadingApp] = useState<boolean>(() =>
     appToken ? false : true
   );
-
+  useEffect(() => {
+    if (params.get("reason") === "auth") {
+      toast.dismiss();
+      toast.error("Please log in first");
+    }
+  }, [params]);
   // validation
   function validate(): boolean {
     const e: { email?: string; password?: string } = {};
@@ -187,7 +193,7 @@ export default function LoginPage() {
       // ✅ Success
       if (data.token || data.success) {
         toast.success("Signed in successfully!");
-        router.push("/dashboard");
+        window.location.href = "/dashboard";
         return;
       }
 

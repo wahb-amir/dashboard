@@ -147,7 +147,6 @@ export const verifyToken: VerifyTokenFn = (token, type = "AUTH") => {
     if (!secret) return null;
 
     const decodedRaw = jwt.verify(token, secret);
-    // jwt.verify can return string or object; coerce to AuthTokenPayload
     const decoded =
       typeof decodedRaw === "string"
         ? { uid: decodedRaw }
