@@ -83,7 +83,7 @@ export async function POST(request: NextRequest): Promise<Response> {
       return Response.json({ error: "Token not found!" }, { status: 400 });
     }
 
-    const decoded = verifyToken(token, "AUTH") as DecodedToken | null;
+    const decoded = verifyToken(token, "APP") as DecodedToken | null;
     if (!decoded) {
       await Promise.all([safeIncr(key), safeExpire(key, BLOCK_TIME)]);
       return Response.json({ error: decoded }, { status: 401 });

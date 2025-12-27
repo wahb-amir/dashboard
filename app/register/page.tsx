@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import toast, { Toaster } from "react-hot-toast";
@@ -18,25 +18,45 @@ type FormState = {
 const APP_TOKEN_URL = "/api/auth/app_token";
 const REGISTER_URL = "/api/auth/register";
 const MAX_RETRIES = 3;
+// default TTL if server doesn't provide one: 30 minutes
+const DEFAULT_TTL_MS = 30 * 60 * 1000;
+// refresh if token has less than this remaining (e.g. 60s)
+const REFRESH_BEFORE_MS = 60 * 1000;
 
-const benefits = [
-  {
-    title: "Fast Onboarding",
-    description:
-      "Get a project started in minutes with quote requests and messaging.",
-    icon: "✓",
-  },
-  {
-    title: "Secure by Default",
-    description: "Role-based access and enterprise-grade isolation available.",
-    icon: "🔒",
-  },
-  {
-    title: "GitHub Integration",
-    description: "Automate progress updates from commits & PRs.",
-    icon: "⚙️",
-  },
-];
+const STORAGE_KEY = "appToken_record";
+
+function setSessionToken(token: string, ttlMs = DEFAULT_TTL_MS) {
+  try {
+    const record = { token, expiry: Date.now() + ttlMs };
+    sessionStorage.setItem(STORAGE_KEY, JSON.stringify(record));
+  } catch (e) {
+    console.error("Failed to set session token", e);
+  }
+}
+
+function getSessionTokenRecord(): { token: string; expiry: number } | null {
+  try {
+    const raw = sessionStorage.getItem(STORAGE_KEY);
+    if (!raw) return null;
+    const rec = JSON.parse(raw);
+    if (!rec || typeof rec.token !== "string" || typeof rec.expiry !== "number")
+      throw new Error("invalid record");
+    if (Date.now() > rec.expiry) {
+      sessionStorage.removeItem(STORAGE_KEY);
+      return null;
+    }
+    return rec;
+  } catch (e) {
+    sessionStorage.removeItem(STORAGE_KEY);
+    return null;
+  }
+}
+
+function removeSessionToken() {
+  try {
+    sessionStorage.removeItem(STORAGE_KEY);
+  } catch {}
+}
 
 export default function SignupPagePlain() {
   const router = useRouter();
@@ -55,15 +75,37 @@ export default function SignupPagePlain() {
   const [loading, setLoading] = useState(false);
   const [serverError, setServerError] = useState<string | null>(null);
 
-  // App token
-  const [appToken, setAppToken] = useState<string | null>(() =>
-    typeof window !== "undefined" ? sessionStorage.getItem("appToken") : null
-  );
+  // App token state + loading derived from session record
+  const [appToken, setAppToken] = useState<string | null>(() => {
+    const rec = getSessionTokenRecord();
+    return rec ? rec.token : null;
+  });
   const [loadingApp, setLoadingApp] = useState<boolean>(() =>
-    typeof window !== "undefined" && sessionStorage.getItem("appToken")
-      ? false
-      : true
+    getSessionTokenRecord() ? false : true
   );
+
+  // in-memory lock/promise to avoid concurrent token fetches
+  const fetchingRef = useRef<Promise<string | null> | null>(null);
+
+  const benefits = [
+    {
+      title: "Fast Onboarding",
+      description:
+        "Get a project started in minutes with quote requests and messaging.",
+      icon: "✓",
+    },
+    {
+      title: "Secure by Default",
+      description:
+        "Role-based access and enterprise-grade isolation available.",
+      icon: "🔒",
+    },
+    {
+      title: "GitHub Integration",
+      description: "Automate progress updates from commits & PRs.",
+      icon: "⚙️",
+    },
+  ];
 
   function validate() {
     const e: Partial<Record<keyof FormState, string>> = {};
@@ -80,76 +122,111 @@ export default function SignupPagePlain() {
     return Object.keys(e).length === 0;
   }
 
-  // Fetch app token + retry/backoff, store to sessionStorage & state
-  useEffect(() => {
-    let mounted = true;
+  // fetch token once with retries; supports server TTL shapes
+  async function fetchAppTokenOnce(): Promise<{
+    token: string;
+    ttlMs?: number;
+  } | null> {
+    for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+      try {
+        if (attempt > 0) {
+          await new Promise((r) => setTimeout(r, Math.pow(2, attempt) * 250));
+        }
 
-    const existing =
-      typeof window !== "undefined" ? sessionStorage.getItem("appToken") : null;
-    if (existing) {
-      setAppToken(existing);
-      setLoadingApp(false);
-      return;
-    }
+        const res = await fetch(APP_TOKEN_URL, {
+          method: "GET",
+          headers: { "Content-Type": "application/json" },
+          credentials: "same-origin",
+        });
 
-    async function fetchAppTokenWithRetries() {
-      setLoadingApp(true);
+        if (!res.ok) {
+          const txt = await res.text().catch(() => "");
+          throw new Error(`Status ${res.status} ${txt}`);
+        }
 
-      for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
-        try {
-          if (!mounted) return;
+        const data = await res.json().catch(() => null);
+        if (!data || !data.token) throw new Error("Invalid token response");
 
-          if (attempt === 0) {
-            toast.loading("Fetching app token...", { id: "app-token" });
-          } else {
-            toast.loading(`Retrying app token (attempt ${attempt + 1})`, {
-              id: "app-token",
-            });
-            await new Promise((r) => setTimeout(r, Math.pow(2, attempt) * 250));
-          }
+        let ttlMs: number | undefined = undefined;
+        if (typeof data.expires_in === "number") ttlMs = data.expires_in * 1000;
+        else if (typeof data.ttl_ms === "number") ttlMs = data.ttl_ms;
+        else if (typeof data.expiresAt === "string") {
+          const when = Date.parse(data.expiresAt);
+          if (!Number.isNaN(when)) ttlMs = when - Date.now();
+        }
 
-          const res = await fetch(APP_TOKEN_URL, {
-            method: "GET",
-            headers: { "Content-Type": "application/json" },
-            credentials: "same-origin",
-          });
-
-          if (!res.ok) {
-            const txt = await res.text().catch(() => "");
-            throw new Error(`Status ${res.status} ${txt}`);
-          }
-
-          const data = await res.json().catch(() => null);
-          if (!data || !data.token) throw new Error("Invalid token response");
-
-          if (!mounted) return;
-          sessionStorage.setItem("appToken", data.token);
-          setAppToken(data.token);
-          toast.dismiss("app-token");
-          toast.success("Ready");
-          setLoadingApp(false);
-          return;
-        } catch (err) {
-          console.error("App token fetch error:", err);
-          if (attempt === MAX_RETRIES - 1) {
-            toast.dismiss("app-token");
-            toast.error("Failed to fetch app token. Please try again later.");
-            if (!mounted) return;
-            setLoadingApp(false);
-            setAppToken(null);
-            return;
-          }
-          // otherwise loop and retry
+        return { token: data.token, ttlMs };
+      } catch (err) {
+        console.error("App token fetch error (attempt)", attempt + 1, err);
+        if (attempt === MAX_RETRIES - 1) {
+          return null;
         }
       }
     }
+    return null;
+  }
 
-    fetchAppTokenWithRetries();
+  // ensure a valid token available (refresh if expired/about-to-expire).
+  async function ensureValidAppToken(): Promise<string | null> {
+    if (fetchingRef.current) return fetchingRef.current;
 
+    const promise = (async () => {
+      setLoadingApp(true);
+      try {
+        const rec = getSessionTokenRecord();
+        if (rec) {
+          const timeLeft = rec.expiry - Date.now();
+          if (timeLeft > REFRESH_BEFORE_MS) {
+            setAppToken(rec.token);
+            return rec.token;
+          }
+        }
+
+        toast.loading("Fetching app token...", { id: "app-token" });
+        const result = await fetchAppTokenOnce();
+        toast.dismiss("app-token");
+
+        if (!result) {
+          removeSessionToken();
+          setAppToken(null);
+          toast.error("Failed to fetch app token. Please try again later.");
+          return null;
+        }
+
+        const ttl = result.ttlMs ?? DEFAULT_TTL_MS;
+        setSessionToken(result.token, ttl);
+        setAppToken(result.token);
+        toast.success("Ready");
+        return result.token;
+      } finally {
+        setLoadingApp(false);
+        fetchingRef.current = null;
+      }
+    })();
+
+    fetchingRef.current = promise;
+    return promise;
+  }
+
+  // init on mount: use stored token if valid, otherwise fetch
+  useEffect(() => {
+    let mounted = true;
+    async function init() {
+      const rec = getSessionTokenRecord();
+      if (rec) {
+        if (!mounted) return;
+        setAppToken(rec.token);
+        setLoadingApp(false);
+        return;
+      }
+      await ensureValidAppToken();
+    }
+    init();
     return () => {
       mounted = false;
       toast.dismiss("app-token");
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
@@ -158,11 +235,8 @@ export default function SignupPagePlain() {
 
     if (!validate()) return;
 
-    const token =
-      appToken ??
-      (typeof window !== "undefined"
-        ? sessionStorage.getItem("appToken")
-        : null);
+    // ensure token (refresh if needed)
+    const token = await ensureValidAppToken();
     if (!token) {
       toast.error("App is not ready. Please wait a moment and try again.");
       return;
@@ -197,14 +271,12 @@ export default function SignupPagePlain() {
       };
 
       let data: ApiResponse | null = null;
-
       try {
         data = (await res.json()) as ApiResponse;
       } catch {
         data = null;
       }
 
-      // ❌ Request failed
       if (!res.ok) {
         throw new Error(
           data?.error ??
@@ -213,28 +285,29 @@ export default function SignupPagePlain() {
         );
       }
 
-      // ❌ Invalid backend response
       if (!data) {
         throw new Error("Invalid response from server");
       }
 
-      // ✅ Success
+      // Success: server might return a session token for the new user.
       if (data.token || data.success) {
+        // If server returned a token for authenticated user, you may want to store it (in cookie/local storage) here.
         toast.success("Account created — welcome ");
-        window.location.href = "/dashboard";
+        router.push("/dashboard");
+        // trigger navbar to update auth state
+        window.dispatchEvent(new Event("auth-change"));
+        // cross-tab: (writes to localStorage to trigger 'storage' across tabs)
+        localStorage.setItem("auth:updated", Date.now().toString());
         return;
       }
 
-      // ❌ Logical failure
       throw new Error(data.message ?? "Registration failed");
     } catch (err: unknown) {
       console.error("Register error:", err);
-
       const message =
         err instanceof Error
           ? err.message
           : "Could not create account. Try again later.";
-
       setServerError(message);
       toast.error(message);
     } finally {
@@ -249,10 +322,7 @@ export default function SignupPagePlain() {
     <div className="flex min-h-screen items-center justify-center bg-gray-50 p-6">
       <Toaster position="top-right" />
 
-      {/* grid: on mobile (grid-cols-1) the form will be first, details below.
-          on lg screens it becomes two columns with details on the left */}
       <div className="w-full max-w-5xl grid grid-cols-1 lg:grid-cols-2 gap-8">
-        {/* FORM: show first on mobile, second on lg */}
         <div className="order-1 lg:order-2 flex items-center">
           <div
             className={`w-full bg-white rounded-2xl shadow-md border border-gray-100 p-6 sm:p-8 transition-opacity ${
@@ -484,7 +554,6 @@ export default function SignupPagePlain() {
           </div>
         </div>
 
-        {/* BENEFITS / EXTRA DETAIL: show second on mobile, first on lg */}
         <aside className="order-2 lg:order-1 flex flex-col justify-center">
           <div className="rounded-2xl p-6 md:p-10 bg-white shadow-sm border border-gray-100">
             <div className="mb-6">

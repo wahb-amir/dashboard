@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import toast, { Toaster } from "react-hot-toast";
@@ -14,6 +14,55 @@ type FormState = {
 
 const APP_TOKEN_URL = "/api/auth/app_token";
 const MAX_RETRIES = 3;
+// default TTL if server doesn't give one: 30 minutes
+const DEFAULT_TTL_MS = 30 * 60 * 1000;
+// if token has < this left, treat as 'about to expire' and refresh (e.g., 60s)
+const REFRESH_BEFORE_MS = 60 * 1000;
+
+const STORAGE_KEY = "appToken_record";
+
+function setSessionToken(token: string, ttlMs = DEFAULT_TTL_MS) {
+  try {
+    if (typeof window === "undefined") return;
+    const record = { token, expiry: Date.now() + ttlMs };
+    sessionStorage.setItem(STORAGE_KEY, JSON.stringify(record));
+  } catch (e) {
+    // storage errors are rare, but don't crash the app
+    console.error("Failed to set session token", e);
+  }
+}
+
+function getSessionTokenRecord(): { token: string; expiry: number } | null {
+  // Guard: do not access sessionStorage on server
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = sessionStorage.getItem(STORAGE_KEY);
+    if (!raw) return null;
+    const rec = JSON.parse(raw);
+    if (!rec || typeof rec.token !== "string" || typeof rec.expiry !== "number")
+      throw new Error("invalid record");
+    // expired?
+    if (Date.now() > rec.expiry) {
+      try {
+        sessionStorage.removeItem(STORAGE_KEY);
+      } catch {}
+      return null;
+    }
+    return rec;
+  } catch (e) {
+    try {
+      sessionStorage.removeItem(STORAGE_KEY);
+    } catch {}
+    return null;
+  }
+}
+
+function removeSessionToken() {
+  try {
+    if (typeof window === "undefined") return;
+    sessionStorage.removeItem(STORAGE_KEY);
+  } catch {}
+}
 
 export default function LoginPage() {
   const router = useRouter();
@@ -25,19 +74,29 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false); // signing in
   const [serverError, setServerError] = useState<string | null>(null);
   const params = useSearchParams();
+
   // App token state + loading
-  const [appToken, setAppToken] = useState<string | null>(() =>
-    typeof window !== "undefined" ? sessionStorage.getItem("appToken") : null
-  );
-  const [loadingApp, setLoadingApp] = useState<boolean>(() =>
-    appToken ? false : true
-  );
+  const [appToken, setAppToken] = useState<string | null>(null);
+  // start "loading" on the client until we read storage in useEffect
+  const [loadingApp, setLoadingApp] = useState<boolean>(true);
+
+  // read sessionStorage only on mount (client)
+  useEffect(() => {
+    const rec = getSessionTokenRecord();
+    if (rec) setAppToken(rec.token);
+    setLoadingApp(false);
+  }, []);
+
+  // in-memory lock / promise to prevent concurrent token fetches
+  const fetchingRef = useRef<Promise<string | null> | null>(null);
+
   useEffect(() => {
     if (params.get("reason") === "auth") {
       toast.dismiss();
       toast.error("Please log in first");
     }
   }, [params]);
+
   // validation
   function validate(): boolean {
     const e: { email?: string; password?: string } = {};
@@ -53,79 +112,125 @@ export default function LoginPage() {
     return Object.keys(e).length === 0;
   }
 
-  // fetch app token with retry logic and store in sessionStorage
-  useEffect(() => {
-    let mounted = true;
-
-    // if token already in sessionStorage, use it and skip fetch
-    const existing =
-      typeof window !== "undefined" ? sessionStorage.getItem("appToken") : null;
-    if (existing) {
-      setAppToken(existing);
-      setLoadingApp(false);
-      return;
-    }
-
-    async function fetchAppTokenWithRetry() {
-      setLoadingApp(true);
-
-      for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
-        try {
-          if (!mounted) return;
-
-          if (attempt === 0) {
-            toast.loading("Fetching app token...", { id: "app-token" });
-          } else {
-            toast.loading(`Retrying app token (attempt ${attempt + 1})`, {
-              id: "app-token",
-            });
-            // backoff (exponential-ish)
-            await new Promise((r) => setTimeout(r, Math.pow(2, attempt) * 250));
-          }
-
-          const res = await fetch(APP_TOKEN_URL, {
-            method: "GET",
-            credentials: "same-origin",
-            headers: { "Content-Type": "application/json" },
-          });
-
-          if (!res.ok) {
-            const text = await res.text().catch(() => "");
-            throw new Error(`Status ${res.status} ${text}`);
-          }
-
-          const data = await res.json().catch(() => null);
-          if (!data || !data.token) throw new Error("Invalid token response");
-
-          if (!mounted) return;
-          sessionStorage.setItem("appToken", data.token);
-          setAppToken(data.token);
-          toast.dismiss("app-token");
-          toast.success("Ready");
-          setLoadingApp(false);
-          return;
-        } catch (err) {
-          console.error("App token fetch error:", err);
-          // if last attempt, show error toast and stop
-          if (attempt === MAX_RETRIES - 1) {
-            toast.dismiss("app-token");
-            toast.error("Failed to fetch app token. Please try again later.");
-            if (!mounted) return;
-            setLoadingApp(false);
-            setAppToken(null);
-            return;
-          }
-          // else loop to retry
+  // core: fetch token with retry; returns token or null
+  async function fetchAppTokenOnce(): Promise<{
+    token: string;
+    ttlMs?: number;
+  } | null> {
+    for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+      try {
+        if (attempt > 0) {
+          // exponential-ish backoff
+          await new Promise((r) => setTimeout(r, Math.pow(2, attempt) * 250));
         }
+
+        const res = await fetch(APP_TOKEN_URL, {
+          method: "GET",
+          credentials: "same-origin",
+          headers: { "Content-Type": "application/json" },
+        });
+
+        if (!res.ok) {
+          const text = await res.text().catch(() => "");
+          throw new Error(`Status ${res.status} ${text}`);
+        }
+
+        const data = await res.json().catch(() => null);
+        if (!data || !data.token) throw new Error("Invalid token response");
+
+        // server may return TTL info:
+        // common shapes: { token, expires_in: seconds } or { token, ttl_ms }
+        let ttlMs: number | undefined = undefined;
+        if (typeof data.expires_in === "number") ttlMs = data.expires_in * 1000;
+        else if (typeof data.ttl_ms === "number") ttlMs = data.ttl_ms;
+        else if (typeof data.expiresAt === "string") {
+          // ISO timestamp
+          const when = Date.parse(data.expiresAt);
+          if (!Number.isNaN(when)) ttlMs = when - Date.now();
+        }
+
+        return { token: data.token, ttlMs };
+      } catch (err) {
+        console.error("App token fetch error (attempt)", attempt + 1, err);
+        if (attempt === MAX_RETRIES - 1) {
+          return null;
+        }
+        // else continue retry loop
       }
     }
+    return null;
+  }
 
-    fetchAppTokenWithRetry();
+  // wrapper that prevents concurrent token fetches and updates state+storage
+  async function ensureValidAppToken(): Promise<string | null> {
+    // if a fetch is already in progress, await it
+    if (fetchingRef.current) return fetchingRef.current;
+
+    const promise = (async () => {
+      setLoadingApp(true);
+      try {
+        // first check existing stored token (safe because this function is called from client code / effects)
+        const rec = getSessionTokenRecord();
+        if (rec) {
+          // if token is about to expire, refresh
+          const timeLeft = rec.expiry - Date.now();
+          if (timeLeft > REFRESH_BEFORE_MS) {
+            setAppToken(rec.token);
+            return rec.token;
+          }
+          // else fallthrough to fetch new
+        }
+
+        // fetch new token
+        toast.loading("Fetching app token...", { id: "app-token" });
+        const result = await fetchAppTokenOnce();
+        toast.dismiss("app-token");
+
+        if (!result) {
+          // failed to fetch
+          removeSessionToken();
+          setAppToken(null);
+          toast.error("Failed to fetch app token. Please try again later.");
+          return null;
+        }
+
+        const ttl = result.ttlMs ?? DEFAULT_TTL_MS;
+        setSessionToken(result.token, ttl);
+        setAppToken(result.token);
+        toast.success("Ready");
+        return result.token;
+      } finally {
+        setLoadingApp(false);
+        fetchingRef.current = null;
+      }
+    })();
+
+    fetchingRef.current = promise;
+    return promise;
+  }
+
+  // on mount: ensure we have token (but don't block UI if already present)
+  useEffect(() => {
+    let mounted = true;
+    async function init() {
+      const rec = getSessionTokenRecord();
+      if (rec) {
+        // token present and not expired
+        if (!mounted) return;
+        setAppToken(rec.token);
+        setLoadingApp(false);
+        return;
+      }
+      // otherwise attempt to fetch right away
+      await ensureValidAppToken();
+    }
+    init();
 
     return () => {
       mounted = false;
       toast.dismiss("app-token");
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
@@ -137,12 +242,8 @@ export default function LoginPage() {
 
     if (!validate()) return;
 
-    // ensure we have appToken (first check state then sessionStorage)
-    let token =
-      appToken ??
-      (typeof window !== "undefined"
-        ? sessionStorage.getItem("appToken")
-        : null);
+    // ensure valid token (refresh if expired or about-to-expire)
+    const token = await ensureValidAppToken();
     if (!token) {
       toast.error("App is not ready. Please wait and try again.");
       return;
@@ -193,7 +294,11 @@ export default function LoginPage() {
       // ✅ Success
       if (data.token || data.success) {
         toast.success("Signed in successfully!");
-        window.location.href = "/dashboard";
+        router.push("/dashboard");
+        // trigger navbar to update auth state
+        window.dispatchEvent(new Event("auth-change"));
+        // cross-tab: (writes to localStorage to trigger 'storage' across tabs)
+        localStorage.setItem("auth:updated", Date.now().toString());
         return;
       }
 

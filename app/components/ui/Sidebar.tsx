@@ -13,7 +13,7 @@ type NavItem = {
 };
 
 const NAV_ITEMS: NavItem[] = [
-  { name: "Home", href: "/dashboard/home", Icon: Home },
+  { name: "Home", href: "/dashboard", Icon: Home },
   { name: "Projects", href: "/dashboard/projects", Icon: Grid },
   { name: "Messages", href: "/dashboard/messages", Icon: MessageSquare },
   { name: "Quotes", href: "/dashboard/quotes", Icon: FileText },
@@ -21,43 +21,28 @@ const NAV_ITEMS: NavItem[] = [
 ];
 
 type SidebarProps = {
-  // mobile control props - when omitted (desktop import usage) default to closed/no-op
-  open?: boolean;
-  setOpen?: (v: boolean) => void;
+  open: boolean;
+  setOpen: (v: boolean) => void;
 };
 
-export default function Sidebar({
-  open = false,
-  setOpen = () => {},
-}: SidebarProps) {
-  const pathname = usePathname() ?? "/";
+export default function Sidebar({ open, setOpen }: SidebarProps) {
+  const pathname = usePathname();
 
-  // lock body scroll when mobile menu is open
+  // Prevent scrolling when mobile menu is open
   useEffect(() => {
     if (open) {
-      const prev = document.body.style.overflow;
       document.body.style.overflow = "hidden";
-      return () => {
-        document.body.style.overflow = prev;
-      };
+    } else {
+      document.body.style.overflow = "";
     }
-    return;
   }, [open]);
-
-  // close on Escape key (mobile)
-  useEffect(() => {
-    function onKey(e: KeyboardEvent) {
-      if (e.key === "Escape") setOpen(false);
-    }
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [setOpen]);
 
   return (
     <>
-      {/* Desktop sidebar */}
-      <aside className="hidden md:flex md:w-64 md:flex-col md:fixed md:inset-y-0 bg-white border-r">
-        <div className="h-16 flex items-center px-4">
+      {/* --- DESKTOP SIDEBAR (flow-based, pinned) --- */}
+      {/* This occupies space in the layout so main content starts after it. */}
+      <aside className="hidden md:flex md:w-64 md:flex-col md:sticky md:top-0 md:h-screen md:z-20 bg-white border-r border-2">
+        <div className="h-16 flex items-center px-4 border-b">
           <Link href="/" className="text-lg font-bold text-black">
             Projects
           </Link>
@@ -67,84 +52,7 @@ export default function Sidebar({
           <ul className="space-y-1">
             {NAV_ITEMS.map((it) => {
               const active =
-                pathname === it.href || pathname.startsWith(it.href + "/");
-              return (
-                <li key={it.href}>
-                  <Link
-                    href={it.href}
-                    className={`flex items-center gap-3 w-full px-3 py-2 rounded-md transition ${
-                      active
-                        ? "bg-blue-50 font-semibold text-black"
-                        : "text-black hover:bg-gray-100"
-                    }`}
-                  >
-                    <it.Icon className="text-black" size={18} />
-                    <span className="text-sm">{it.name}</span>
-                  </Link>
-                </li>
-              );
-            })}
-          </ul>
-        </nav>
-
-        <div className="p-4 border-t">
-          <Link
-            href="/settings"
-            className="text-sm text-black hover:text-black"
-          >
-            Settings
-          </Link>
-        </div>
-      </aside>
-
-      {/* ---------- Mobile overlay & drawer (controlled by props) ---------- */}
-      <div
-        className={`fixed inset-0 z-40 md:hidden transition-opacity ${
-          open
-            ? "opacity-100 pointer-events-auto"
-            : "opacity-0 pointer-events-none"
-        }`}
-        aria-hidden={!open}
-        onClick={() => setOpen(false)}
-        onTouchStart={() => setOpen(false)}
-      >
-        <div className="absolute inset-0 bg-black/40" />
-      </div>
-
-      <div
-        className={`fixed z-50 top-0 left-0 bottom-0 w-72 max-w-[85vw] bg-white border-r md:hidden transform transition-transform ${
-          open ? "translate-x-0" : "-translate-x-full"
-        }`}
-        role="dialog"
-        aria-modal={open}
-        aria-hidden={!open}
-      >
-        <div className="h-16 flex items-center px-4 border-b">
-          <Link
-            href="/"
-            className="text-lg font-bold text-black"
-            onClick={() => setOpen(false)}
-          >
-            Projects
-          </Link>
-
-          <button
-            aria-label="Close menu"
-            className="ml-auto p-2 rounded-md hover:bg-gray-100"
-            onClick={() => setOpen(false)}
-          >
-            <X size={18} className="text-black" />
-          </button>
-        </div>
-
-        <nav
-          className="px-2 py-4 overflow-y-auto"
-          aria-label="Mobile navigation"
-        >
-          <ul className="space-y-1">
-            {NAV_ITEMS.map((it) => {
-              const active =
-                pathname === it.href || pathname.startsWith(it.href + "/");
+                pathname === it.href || pathname?.startsWith(it.href + "/");
               return (
                 <li key={it.href}>
                   <Link
@@ -152,11 +60,14 @@ export default function Sidebar({
                     onClick={() => setOpen(false)}
                     className={`flex items-center gap-3 w-full px-3 py-2 rounded-md transition ${
                       active
-                        ? "bg-blue-50 font-semibold text-black"
-                        : "text-black hover:bg-gray-100"
+                        ? "bg-blue-100 font-semibold text-black"
+                        : "text-gray-700 hover:bg-gray-100"
                     }`}
                   >
-                    <it.Icon className="text-black" size={18} />
+                    <it.Icon
+                      size={18}
+                      className={active ? "text-black" : "text-gray-700"}
+                    />
                     <span className="text-sm">{it.name}</span>
                   </Link>
                 </li>
@@ -168,8 +79,63 @@ export default function Sidebar({
         <div className="p-4 border-t">
           <Link
             href="/settings"
-            className="text-sm text-black hover:text-black"
+            className="text-sm text-gray-700 hover:text-black"
+          >
+            Settings
+          </Link>
+        </div>
+      </aside>
+
+      {/* --- MOBILE OVERLAY --- */}
+      <div
+        className={`fixed inset-0 z-40 bg-black/50 md:hidden transition-opacity duration-300 ${
+          open
+            ? "opacity-100 pointer-events-auto"
+            : "opacity-0 pointer-events-none"
+        }`}
+        onClick={() => setOpen(false)}
+        aria-hidden={!open}
+      />
+
+      {/* --- MOBILE DRAWER --- */}
+      <div
+        className={`fixed inset-y-0 left-0 z-50 w-64 bg-white shadow-lg transform transition-transform duration-300 md:hidden ${
+          open ? "translate-x-0" : "-translate-x-full"
+        }`}
+        role="dialog"
+        aria-modal={open}
+        aria-hidden={!open}
+      >
+        <div className="h-16 flex items-center justify-between px-4 border-b">
+          <span className="text-lg font-bold text-gray-900">Menu</span>
+          <button
             onClick={() => setOpen(false)}
+            className="p-2 rounded-md hover:bg-gray-100"
+            aria-label="Close menu"
+          >
+            <X size={20} className="text-gray-900" />
+          </button>
+        </div>
+
+        <nav className="p-4 space-y-2" aria-label="Mobile navigation">
+          {NAV_ITEMS.map((it) => (
+            <Link
+              key={it.href}
+              href={it.href}
+              onClick={() => setOpen(false)}
+              className="flex items-center gap-3 px-3 py-2 rounded-md hover:bg-gray-100 text-gray-900"
+            >
+              <it.Icon size={18} className="text-gray-900" />
+              <span className="text-sm font-medium">{it.name}</span>
+            </Link>
+          ))}
+        </nav>
+
+        <div className="p-4 border-t">
+          <Link
+            href="/settings"
+            onClick={() => setOpen(false)}
+            className="text-sm text-gray-900 hover:text-black"
           >
             Settings
           </Link>

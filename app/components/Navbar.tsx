@@ -1,3 +1,4 @@
+// app/components/Navbar.tsx  (or wherever your Navbar is)
 "use client";
 
 import Link from "next/link";
@@ -5,43 +6,77 @@ import Logo from "./ui/Logo";
 import type { AuthTokenPayload } from "../utils/token";
 import { usePathname, useRouter } from "next/navigation";
 import Sidebar from "./ui/Sidebar";
-import { Bell, Menu, X } from "lucide-react";
+import { Bell, Menu } from "lucide-react";
 import React, { useEffect, useState } from "react";
 
-type NavbarProps = {
-  userAuth: AuthTokenPayload | false;
-  messageCount?: number; // optional - default 0
-};
+type CheckAuthResult = any;
 
-export default function Navbar({ userAuth, messageCount = 0 }: NavbarProps) {
+export default function Navbar() {
   const pathname = usePathname() ?? "/";
-  const isAuthed = Boolean(userAuth);
   const router = useRouter();
 
   const showSidebar = pathname.startsWith("/dashboard");
 
-  // Controlled sidebar state (Navbar owns the open state)
-  const [sidebarOpen, setSidebarOpen] = useState(false);
+  // mobile menu state
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+
+  const [userAuth, setUserAuth] = useState<AuthTokenPayload | null>(null);
+  const [isAuthed, setIsAuthed] = useState(false);
+  const [loadingAuth, setLoadingAuth] = useState(true);
+  const [messageCount, setMessageCount] = useState<number>(0);
+
+  useEffect(() => {
+    setIsMobileMenuOpen(false);
+  }, [pathname]);
+
+  useEffect(() => {
+    let mounted = true;
+    async function runCheck() {
+      setLoadingAuth(true);
+      try {
+        const server = await fetch("/api/auth/checkauth", {
+          credentials: "include",
+        });
+        const res: CheckAuthResult = await server.json();
+        if (!mounted) return;
+
+        if (!res) {
+          setUserAuth(null);
+          setIsAuthed(false);
+          setMessageCount(0);
+        } else if (res.auth) {
+          setIsAuthed(true);
+          setUserAuth(res);
+        } else {
+          setIsAuthed(false);
+        }
+      } catch (err) {
+        console.error("checkAuth error:", err);
+        if (!mounted) return;
+        setUserAuth(null);
+        setIsAuthed(false);
+        setMessageCount(0);
+      } finally {
+        if (!mounted) return;
+        setLoadingAuth(false);
+      }
+    }
+    runCheck();
+    return () => {
+      mounted = false;
+    };
+  }, []);
 
   const profileLetter = (() => {
     if (!userAuth) return "U";
-    const source = userAuth.name || userAuth.email;
+    const source =
+      (userAuth.user as any)?.name || (userAuth.user as any)?.email;
     if (!source || typeof source !== "string") return "U";
     return source.charAt(0).toUpperCase();
   })();
 
   return (
     <>
-      {/* Desktop sidebar (unchanged) */}
-      {showSidebar && (
-        <div className="hidden md:block">
-          <Sidebar
-            open={false}
-            setOpen={() => {}} /* desktop uses its own fixed layout */
-          />
-        </div>
-      )}
-
       <header className="sticky top-0 z-50 w-full bg-white backdrop-blur-md border-b border-gray-200 shadow-sm">
         <div className="container mx-auto px-4">
           <div className="flex items-center h-14 md:h-16">
@@ -53,23 +88,18 @@ export default function Navbar({ userAuth, messageCount = 0 }: NavbarProps) {
 
             <div className="flex-1" />
 
-            {/* Mobile actions (hamburger moved here) */}
+            {/* Mobile actions */}
             <nav
               className="flex items-center space-x-2 md:hidden"
               aria-label="Primary"
             >
-              {/* Hamburger (mobile) - only show when dashboard routes should display sidebar */}
               {showSidebar && (
                 <button
-                  aria-label={sidebarOpen ? "Close menu" : "Open menu"}
-                  onClick={() => setSidebarOpen((s) => !s)}
+                  aria-label="Open menu"
+                  onClick={() => setIsMobileMenuOpen(true)}
                   className="p-2 rounded-md hover:bg-gray-100 transition"
                 >
-                  {!sidebarOpen ? (
-                    <Menu size={20} className="text-black" />
-                  ) : (
-                    <X size={20} className="text-black" />
-                  )}
+                  <Menu size={20} className="text-black" />
                 </button>
               )}
 
@@ -82,11 +112,9 @@ export default function Navbar({ userAuth, messageCount = 0 }: NavbarProps) {
                 </Link>
               )}
 
-              {isAuthed ? (
-                // make Dashboard text smaller to fit on mobile
+              {!loadingAuth && isAuthed ? (
                 <Link
                   href="/dashboard"
-                  onClick={() => setSidebarOpen(false)}
                   className="text-xs inline-flex items-center px-2 py-1 rounded-md font-semibold bg-blue-600 text-white"
                 >
                   Dashboard
@@ -95,11 +123,10 @@ export default function Navbar({ userAuth, messageCount = 0 }: NavbarProps) {
                 <>
                   <Link
                     href="/login"
-                    className="inline-flex items-center px-3 py-1 text-sm rounded-md font-medium border border-transparent text-black hover:text-gray-900 transition"
+                    className="inline-flex items-center px-3 py-1 text-sm rounded-md font-medium text-black hover:text-gray-900 transition"
                   >
                     Log In
                   </Link>
-
                   <Link
                     href="/register"
                     className="inline-flex items-center px-3 py-1 text-sm rounded-md font-semibold bg-blue-600 text-white hover:brightness-90 transition"
@@ -110,7 +137,7 @@ export default function Navbar({ userAuth, messageCount = 0 }: NavbarProps) {
               )}
             </nav>
 
-            {/* DESKTOP NAV */}
+            {/* Desktop nav */}
             <nav
               className="hidden md:flex items-center space-x-3"
               aria-label="Primary"
@@ -124,15 +151,14 @@ export default function Navbar({ userAuth, messageCount = 0 }: NavbarProps) {
                 </Link>
               )}
 
-              {!isAuthed ? (
+              {!loadingAuth && !isAuthed ? (
                 <>
                   <Link
                     href="/login"
-                    className="inline-flex items-center px-3 py-1.5 text-sm rounded-md font-medium border border-transparent text-black hover:text-gray-900 transition"
+                    className="inline-flex items-center px-3 py-1.5 text-sm rounded-md font-medium text-black hover:text-gray-900 transition"
                   >
                     Log In
                   </Link>
-
                   <Link
                     href="/register"
                     className="inline-flex items-center px-4 py-2 text-sm rounded-md font-semibold bg-blue-600 text-white hover:brightness-90 transition"
@@ -140,6 +166,10 @@ export default function Navbar({ userAuth, messageCount = 0 }: NavbarProps) {
                     Get Started
                   </Link>
                 </>
+              ) : loadingAuth ? (
+                <div className="inline-flex items-center px-4 py-2 text-sm rounded-md bg-gray-100 text-gray-500">
+                  Checking…
+                </div>
               ) : (
                 <>
                   <button
@@ -176,9 +206,10 @@ export default function Navbar({ userAuth, messageCount = 0 }: NavbarProps) {
         </div>
       </header>
 
-      {/* Controlled Sidebar (mobile drawer). We pass open/setOpen so Navbar controls it.
-          For desktop the Sidebar component still renders its fixed layout (we keep that above). */}
-      {showSidebar && <Sidebar open={sidebarOpen} setOpen={setSidebarOpen} />}
+      {/* Mobile Sidebar instance (controlled via state). Navbar only renders the mobile instance */}
+      {showSidebar && (
+        <Sidebar open={isMobileMenuOpen} setOpen={setIsMobileMenuOpen} />
+      )}
     </>
   );
 }

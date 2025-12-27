@@ -1,8 +1,9 @@
+// /app/layout.tsx
 import { Geist, Geist_Mono } from "next/font/google";
 import { headers } from "next/headers";
 import "./globals.css";
 import Footer from "./components/Footer";
-import NavbarWrapper from "./components/NavbarWrapper";
+import NavbarWrapper from "./components/Navbar";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",

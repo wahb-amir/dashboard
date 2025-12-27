@@ -27,7 +27,7 @@ const Page = async () => {
               {/* CTA Buttons */}
               <div className="flex flex-col gap-3 sm:flex-row sm:gap-4 mt-4">
                 <Link
-                  href={auth ? "/dashboard" : "/login"}
+                  href={auth ? "/dashboard" : "/register"}
                   className="px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-md shadow-md transition"
                 >
                   Get Started
