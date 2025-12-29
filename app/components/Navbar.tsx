@@ -1,33 +1,44 @@
-// app/components/Navbar.tsx  (or wherever your Navbar is)
+// app/components/Navbar.tsx
 "use client";
 
 import Link from "next/link";
 import Logo from "./ui/Logo";
 import type { AuthTokenPayload } from "../utils/token";
 import { usePathname, useRouter } from "next/navigation";
-import Sidebar from "./ui/Sidebar";
 import { Bell, Menu } from "lucide-react";
 import React, { useEffect, useState } from "react";
 
 type CheckAuthResult = any;
 
-export default function Navbar() {
+type NavbarProps = {
+  isMobileMenuOpen?: boolean;
+  setIsMobileMenuOpen?: (v: boolean) => void;
+};
+
+export default function Navbar({
+  isMobileMenuOpen = false,
+  setIsMobileMenuOpen = () => {},
+}: NavbarProps) {
   const pathname = usePathname() ?? "/";
   const router = useRouter();
 
   const showSidebar = pathname.startsWith("/dashboard");
 
-  // mobile menu state
-  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  // Close mobile menu when route changes (delegated to layout via prop)
+  useEffect(() => {
+    // guard in case parent didn't provide setter
+    try {
+      setIsMobileMenuOpen(false);
+    } catch (e) {
+      // ignore
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pathname]);
 
   const [userAuth, setUserAuth] = useState<AuthTokenPayload | null>(null);
   const [isAuthed, setIsAuthed] = useState(false);
   const [loadingAuth, setLoadingAuth] = useState(true);
   const [messageCount, setMessageCount] = useState<number>(0);
-
-  useEffect(() => {
-    setIsMobileMenuOpen(false);
-  }, [pathname]);
 
   useEffect(() => {
     let mounted = true;
@@ -173,7 +184,7 @@ export default function Navbar() {
               ) : (
                 <>
                   <button
-                    onClick={() => router.push("/messages")}
+                    onClick={() => router.push("/dashboard/messages")}
                     aria-label="Unread messages"
                     className="relative inline-flex items-center p-1 rounded-md hover:bg-gray-100 transition"
                   >
@@ -205,11 +216,6 @@ export default function Navbar() {
           </div>
         </div>
       </header>
-
-      {/* Mobile Sidebar instance (controlled via state). Navbar only renders the mobile instance */}
-      {showSidebar && (
-        <Sidebar open={isMobileMenuOpen} setOpen={setIsMobileMenuOpen} />
-      )}
     </>
   );
 }

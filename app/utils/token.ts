@@ -41,7 +41,7 @@ export interface AuthTokenPayload {
 }
 
 export interface GenerateTokenOptions {
-  expiresIn?: string | number;
+  expiresIn?: string;
 }
 
 export interface VerifyResult {
@@ -67,6 +67,23 @@ export type VerifyTokenFn = (
 ) => VerifyResult | null;
 export type CheckAuthFn = (token: string) => AuthTokenPayload | null;
 
+export const generateToken: GenerateTokenFn = (
+  payload = {},
+  type = "AUTH",
+  opts = {}
+) => {
+  const secret = type === "APP" ? APP_SECRET : AUTH_SECRET;
+  if (!secret) throw new Error("Missing JWT secret for type " + type);
+
+  const expiresIn: jwt.SignOptions["expiresIn"] = (opts.expiresIn ??
+    (type === "AUTH"
+      ? AUTH_EXPIRES_IN_APP
+      : "7d")) as jwt.SignOptions["expiresIn"];
+
+  const signOptions: jwt.SignOptions = { expiresIn };
+
+  return jwt.sign(payload as jwt.JwtPayload, secret, signOptions) as string;
+};
 /* ---------------------------
    Implementation
    --------------------------- */
@@ -96,23 +113,6 @@ export const validateInternalToken: ValidateInternalTokenFn = (token) => {
 /**
  * generateToken
  */
-export const generateToken: GenerateTokenFn = (
-  payload = {},
-  type = "AUTH",
-  opts = {}
-) => {
-  const secret = type === "APP" ? APP_SECRET : AUTH_SECRET;
-  if (!secret) throw new Error("Missing JWT secret for type " + type);
-
-  const expiresIn: jwt.SignOptions["expiresIn"] = (opts.expiresIn ??
-    (type === "AUTH"
-      ? AUTH_EXPIRES_IN_APP
-      : "7d")) as jwt.SignOptions["expiresIn"];
-
-  const signOptions: jwt.SignOptions = { expiresIn };
-
-  return jwt.sign(payload as jwt.JwtPayload, secret, signOptions) as string;
-};
 
 /**
  * renewAuthToken — renew a token using a refresh token (expects AUTH token data)
@@ -154,6 +154,7 @@ export const verifyToken: VerifyTokenFn = (token, type = "AUTH") => {
 
     return { decoded };
   } catch (err) {
+    console.log(err)
     return null;
   }
 };

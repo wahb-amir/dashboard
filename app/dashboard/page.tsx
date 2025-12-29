@@ -20,7 +20,6 @@ export default async function Page() {
   // Render client component — server handles SEO + redirect.
   return (
     <>
-      
       <DashboardPageClient user={user} needsRefresh={needsRefresh} />{" "}
     </>
   );

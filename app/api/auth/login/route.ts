@@ -136,12 +136,16 @@ export async function POST(request: NextRequest): Promise<Response> {
       role: user.role || "client",
       name: user.name || " ",
     });
-    const refreshToken = generateToken({
-      uid: userId,
-      email: user.email,
-      role: user.role || "client",
-      name: user.name || " ",
-    });
+    const refreshToken = generateToken(
+      {
+        uid: userId,
+        email: user.email,
+        role: user.role || "client",
+        name: user.name || " ",
+      },
+      "AUTH",
+      { expiresIn: "7d" }
+    );
 
     const res = Response.json(
       {
