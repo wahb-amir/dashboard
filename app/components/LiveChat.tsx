@@ -15,6 +15,7 @@ export interface LiveChatProps {
   userName?: string | null;
   initialMessages?: ChatMessage[]; // optional seed
   maxMessages?: number;
+  userEmail?: string | null; // add this
 }
 
 /**
