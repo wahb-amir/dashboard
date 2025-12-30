@@ -13,9 +13,9 @@ import {
   PauseCircle,
   Activity,
   MessageSquare,
-  GitCommit,
 } from "lucide-react";
 import LiveChat from "../LiveChat";
+
 interface Props {
   user: AuthTokenPayload | null;
   needsRefresh: boolean;
@@ -30,29 +30,16 @@ type Project = {
   status: "In Progress" | "On Hold" | "Completed";
 };
 
-type ActivityItem =
-  | {
-      type: "message";
-      id: string;
-      author: string;
-      content: string;
-      time: string;
-    }
-  | {
-      type: "commit";
-      id: string;
-      author: string;
-      message: string;
-      time: string;
-    };
-
 export default function DashboardPageClient({ user, needsRefresh }: Props) {
   const router = useRouter();
   const [currentUser, setCurrentUser] = useState<AuthTokenPayload | null>(user);
   const [loading, setLoading] = useState<boolean>(false);
   const [retryCount, setRetryCount] = useState(0);
+  const [failed, setFailed] = useState(false);
 
-  // session refresh logic (kept from your original)
+  const MAX_RETRIES = 2;
+
+  // session refresh logic
   useEffect(() => {
     if (!needsRefresh) return;
     if (loading) return;
@@ -61,7 +48,9 @@ export default function DashboardPageClient({ user, needsRefresh }: Props) {
     let cancelled = false;
 
     async function rotate() {
+      setFailed(false); // clear previous failed while attempting
       setLoading(true);
+
       try {
         const res = await fetch("/api/auth/checkauth", {
           method: "GET",
@@ -73,6 +62,7 @@ export default function DashboardPageClient({ user, needsRefresh }: Props) {
         if (controller.signal.aborted || cancelled) return;
 
         if (res.status === 401) {
+          // session invalid -> force sign-in
           setCurrentUser(null);
           toast.error("Session expired. Please sign in again.");
           router.push("/login?reason=session_expired");
@@ -80,12 +70,30 @@ export default function DashboardPageClient({ user, needsRefresh }: Props) {
         }
 
         if (!res.ok) {
-          toast.error("Session refresh failed. Please sign in again.");
-          setCurrentUser(null);
+          // transient error -> retry until MAX_RETRIES then mark failed
+          if (retryCount < MAX_RETRIES) {
+            setRetryCount((c) => c + 1);
+          } else {
+            setFailed(true);
+            setCurrentUser(null);
+            toast.error("Session refresh failed after multiple attempts.");
+          }
           return;
         }
 
         const data = await res.json().catch(() => null);
+        if (!data) {
+          if (retryCount < MAX_RETRIES) {
+            setRetryCount((c) => c + 1);
+          } else {
+            setFailed(true);
+            setCurrentUser(null);
+            toast.error("Session refresh returned invalid data.");
+          }
+          return;
+        }
+
+        // success cases
         if (data && data.user) {
           setCurrentUser(data.user);
           toast.success("Session refreshed");
@@ -93,13 +101,24 @@ export default function DashboardPageClient({ user, needsRefresh }: Props) {
           setCurrentUser(data);
           toast.success("Session refreshed");
         } else {
-          toast.error("Failed to refresh session — please sign in.");
-          setCurrentUser(null);
+          // treat unexpected payload as failure
+          if (retryCount < MAX_RETRIES) {
+            setRetryCount((c) => c + 1);
+          } else {
+            setFailed(true);
+            setCurrentUser(null);
+            toast.error("Failed to refresh session — please sign in.");
+          }
         }
       } catch (err: any) {
         if (err?.name === "AbortError") return;
-        toast.error("Network error while refreshing session");
-        if (!cancelled && retryCount < 2) setRetryCount((c) => c + 1);
+        if (retryCount < MAX_RETRIES) {
+          setRetryCount((c) => c + 1);
+        } else {
+          setFailed(true);
+          setCurrentUser(null);
+          toast.error("Network error while refreshing session");
+        }
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -155,9 +174,6 @@ export default function DashboardPageClient({ user, needsRefresh }: Props) {
       p.description.toLowerCase().includes(query.toLowerCase())
   );
 
-  
-
-  // --- UI helpers ---
   function statusBadge(status: Project["status"]) {
     if (status === "Completed")
       return (
@@ -178,23 +194,24 @@ export default function DashboardPageClient({ user, needsRefresh }: Props) {
     );
   }
 
-  if (!currentUser && loading) {
-    return (
-      <div aria-live="polite" className="p-4">
-        Loading session…
-      </div>
-    );
-  }
-
-  if (!currentUser) {
+  // ---- New UI behavior per your request:
+  // If loading or no current user and NOT failed -> show skeleton loading
+  // If failed -> show unable to load + retry
+  if (!currentUser && failed) {
     return (
       <div className="p-6">
         <div className="text-lg font-semibold text-black">
-          Unable to load account. Please sign in.
+          Unable to load account.
         </div>
-        <div className="mt-3">
+        <div className="mt-2 text-sm text-gray-600">
+          Something went wrong while fetching your session. You can retry.
+        </div>
+        <div className="mt-4">
           <button
-            onClick={() => setRetryCount((c) => c + 1)}
+            onClick={() => {
+              setFailed(false);
+              setRetryCount((c) => c + 1); // retrigger effect
+            }}
             className="inline-flex items-center gap-2 px-3 py-2 rounded-md bg-blue-600 text-white"
           >
             Retry
@@ -205,7 +222,58 @@ export default function DashboardPageClient({ user, needsRefresh }: Props) {
     );
   }
 
-  // --- Render ---
+  // skeleton loading when not failed and session not available yet
+  if (!currentUser && !failed) {
+    return (
+      <div className="max-w-7xl mx-auto p-4">
+        <div className="animate-pulse space-y-6">
+          {/* header skeleton */}
+          <div className="flex items-center justify-between">
+            <div className="space-y-2">
+              <div className="h-6 w-48 bg-gray-200 rounded" />
+              <div className="h-4 w-64 bg-gray-200 rounded mt-2" />
+            </div>
+            <div className="flex items-center gap-3">
+              <div className="h-10 w-32 bg-gray-200 rounded" />
+              <div className="h-10 w-10 bg-gray-200 rounded-full" />
+            </div>
+          </div>
+
+          {/* grid skeleton */}
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            <div className="lg:col-span-2 space-y-4">
+              {Array.from({ length: 3 }).map((_, i) => (
+                <div
+                  key={i}
+                  className="bg-white rounded-lg shadow-sm border p-4"
+                >
+                  <div className="h-5 w-40 bg-gray-200 rounded mb-3" />
+                  <div className="h-4 w-32 bg-gray-200 rounded mb-2" />
+                  <div className="h-3 w-full bg-gray-200 rounded mt-2" />
+                  <div className="h-3 w-5/6 bg-gray-200 rounded mt-2" />
+                  <div className="mt-4 h-3 w-24 bg-gray-200 rounded" />
+                </div>
+              ))}
+            </div>
+
+            <aside className="space-y-4">
+              <div className="bg-white rounded-lg shadow-sm border p-4">
+                <div className="h-4 w-36 bg-gray-200 rounded mb-2" />
+                <div className="h-3 w-full bg-gray-200 rounded" />
+              </div>
+
+              <div className="bg-white rounded-lg shadow-sm border p-4">
+                <div className="h-4 w-28 bg-gray-200 rounded mb-3" />
+                <div className="h-12 w-full bg-gray-200 rounded" />
+              </div>
+            </aside>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // --- Render normal dashboard when currentUser is present ---
   return (
     <div className="max-w-7xl mx-auto">
       {/* Header row */}
