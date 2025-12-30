@@ -4,6 +4,7 @@ import React, { useEffect, useState, useMemo } from "react";
 import toast from "react-hot-toast";
 import { useRouter } from "next/navigation";
 import type { AuthTokenPayload } from "@/app/utils/token";
+import CreateProjectModal from "../ui/CreateProjectModal";
 import {
   Plus,
   Search,
@@ -38,7 +39,15 @@ export default function DashboardPageClient({ user, needsRefresh }: Props) {
   const [failed, setFailed] = useState(false);
 
   const MAX_RETRIES = 2;
+  const [open, setOpen] = useState(false);
 
+  const onCreate = async (payload: any) => {
+    // fake async API call
+    await new Promise((res) => setTimeout(res, 700));
+    console.log("Create:", payload);
+    toast.success("Project created!");
+    // optionally navigate or refresh
+  };
   // session refresh logic
   useEffect(() => {
     if (!needsRefresh) return;
@@ -302,12 +311,17 @@ export default function DashboardPageClient({ user, needsRefresh }: Props) {
           </div>
 
           <button
-            onClick={() => router.push("/dashboard/projects/new")}
+            onClick={() => setOpen(true)}
             className="inline-flex items-center gap-2 px-3 py-2 rounded-md bg-blue-600 text-white font-semibold hover:brightness-95 transition"
           >
             <Plus size={16} />
             New Project
           </button>
+          <CreateProjectModal
+            open={open}
+            onClose={() => setOpen(false)}
+            onCreate={onCreate}
+          />
         </div>
       </div>
 
@@ -391,8 +405,8 @@ export default function DashboardPageClient({ user, needsRefresh }: Props) {
               </button>
 
               <button
-                onClick={() => router.push("/dashboard/projects/new")}
-                className="w-full inline-flex items-center justify-between gap-2 px-3 py-2 rounded-md bg-blue-600 text-white hover:brightness-95 transition"
+                onClick={() => setOpen(true)}
+                className="w-full inline-flex items-center justify-between gap-2 px-3 py-2 rounded-md bg-blue-600 text-white  transition"
               >
                 <span>Create Project</span>
                 <Plus size={16} />

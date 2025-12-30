@@ -52,20 +52,21 @@ const UserSchema = new Schema<IUser>(
 );
 
 // Only hash password if it's new or modified
-UserSchema.pre<IUser>("save", async function (next) {
-  if (!this.isModified("password")) return next();
+UserSchema.pre<IUser>("save", async function () {
+  if (!this.isModified("password")) return;
+
   try {
     const hashed = await hashPassword(this.password);
     this.password = hashed;
-    next();
   } catch (err) {
-    next(err as any);
+    throw err; 
   }
 });
 
 UserSchema.methods.comparePassword = async function (plain: string) {
   throw new Error("comparePassword not implemented - use your compare util");
 };
+
 
 // Prevent model recompilation in dev/hot-reload environments
 const User: Model<IUser> =
