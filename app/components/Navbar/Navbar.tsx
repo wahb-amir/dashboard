@@ -1,9 +1,8 @@
-// app/components/Navbar.tsx
 "use client";
 
 import Link from "next/link";
-import Logo from "./ui/Logo";
-import type { AuthTokenPayload } from "../utils/token";
+import Logo from "@/app/components/ui/Logo";
+import type { AuthTokenPayload } from "@/app/utils/token";
 import { usePathname, useRouter } from "next/navigation";
 import { Bell, Menu } from "lucide-react";
 import React, { useEffect, useState } from "react";
@@ -24,9 +23,7 @@ export default function Navbar({
 
   const showSidebar = pathname.startsWith("/dashboard");
 
-  // Close mobile menu when route changes (delegated to layout via prop)
   useEffect(() => {
-    // guard in case parent didn't provide setter
     try {
       setIsMobileMenuOpen(false);
     } catch (e) {

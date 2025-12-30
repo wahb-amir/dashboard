@@ -1,5 +1,4 @@
 import LayoutWrapper from "./layoutWrapper";
-
 export default function DashboardLayout({
   children,
 }: {

@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect } from "react";
+import React, { useEffect, useState, useCallback } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import type { LucideIcon } from "lucide-react";
@@ -21,42 +21,51 @@ const NAV_ITEMS: NavItem[] = [
 ];
 
 type SidebarProps = {
-  // mobile control props - when omitted (desktop import usage) default to closed/no-op
+  // If omitted, component will manage its own open state (uncontrolled)
   open?: boolean;
   setOpen?: (v: boolean) => void;
 };
 
 export default function Sidebar({
-  open = false,
-  setOpen = () => {},
+  open: openProp,
+  setOpen: setOpenProp,
 }: SidebarProps) {
+  // support controlled (props) or uncontrolled (internal state)
+  const [internalOpen, setInternalOpen] = useState(false);
+  const isControlled =
+    typeof openProp === "boolean" && typeof setOpenProp === "function";
+  const open = isControlled ? openProp! : internalOpen;
+  const setOpen = isControlled ? setOpenProp! : setInternalOpen;
+
   const pathname = usePathname() ?? "/";
 
-  // lock body scroll when mobile menu is open
+  // lock body scroll when menu open
   useEffect(() => {
-    if (open) {
-      const prev = document.body.style.overflow;
-      document.body.style.overflow = "hidden";
-      return () => {
-        document.body.style.overflow = prev;
-      };
-    }
-    return;
+    if (!open) return;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = prev;
+    };
   }, [open]);
 
-  // close on Escape key (mobile)
-  useEffect(() => {
-    function onKey(e: KeyboardEvent) {
+  // close on Escape
+  const onKey = useCallback(
+    (e: KeyboardEvent) => {
       if (e.key === "Escape") setOpen(false);
-    }
+    },
+    [setOpen]
+  );
+
+  useEffect(() => {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [setOpen]);
+  }, [onKey]);
 
   return (
     <>
       {/* Desktop sidebar */}
-      <aside className="hidden md:flex md:w-64 md:flex-col md:fixed md:inset-y-0 md:left-0 md:z-20 bg-white border-r ">
+      <aside className="hidden md:flex md:w-64 md:flex-col md:fixed md:inset-y-0 md:left-0 md:z-20 bg-white border-r">
         <div className="h-16 flex items-center px-4">
           <Link href="/" className="text-lg font-bold text-black">
             Projects
@@ -78,7 +87,7 @@ export default function Sidebar({
                 <li key={it.href}>
                   <Link
                     href={it.href}
-                    onClick={() => setOpen(false)} // for mobile
+                    onClick={() => setOpen(false)} // safe in both modes
                     className={`flex items-center gap-3 w-full px-3 py-2 rounded-md transition ${
                       active
                         ? "bg-blue-200 font-semibold text-black"
@@ -98,33 +107,43 @@ export default function Sidebar({
           <Link
             href="/settings"
             className="text-sm text-black hover:text-black"
+            onClick={() => setOpen(false)}
           >
             Settings
           </Link>
         </div>
       </aside>
 
-      {/* ---------- Mobile overlay & drawer (controlled by props) ---------- */}
+      {/* Mobile backdrop */}
+      {/* Render backdrop even when closed so tailwind transitions don't get purged; classes include both states */}
       <div
-        className={`fixed inset-0 z-40 md:hidden transition-opacity ${
+        className={`fixed inset-0 z-40 md:hidden transition-opacity duration-200 ${
           open
             ? "opacity-100 pointer-events-auto"
             : "opacity-0 pointer-events-none"
         }`}
         aria-hidden={!open}
-        onClick={() => setOpen(false)}
-        onTouchStart={() => setOpen(false)}
       >
-        <div className="absolute inset-0 bg-black/40" />
+        {/* clickable backdrop (below the drawer) */}
+        <div
+          className="absolute inset-0 bg-black/40"
+          onClick={() => setOpen(false)}
+          onTouchStart={() => setOpen(false)}
+        />
       </div>
 
+      {/* Mobile drawer */}
       <div
-        className={`fixed z-50 top-0 left-0 bottom-0 w-72 max-w-[85vw] bg-white border-r md:hidden transform transition-transform ${
+        // drawer sits above backdrop (z-50)
+        className={`fixed z-50 top-0 left-0 bottom-0 w-72 max-w-[85vw] bg-white border-r md:hidden transform transition-transform duration-200 ${
           open ? "translate-x-0" : "-translate-x-full"
         }`}
         role="dialog"
         aria-modal={open}
         aria-hidden={!open}
+        // prevent clicks inside drawer from bubbling to backdrop
+        onClick={(e) => e.stopPropagation()}
+        onTouchStart={(e) => e.stopPropagation()}
       >
         <div className="h-16 flex items-center px-4 border-b">
           <Link
