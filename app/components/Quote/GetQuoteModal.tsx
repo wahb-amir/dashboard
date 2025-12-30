@@ -1,43 +1,45 @@
+// components/GetQuoteModal.tsx
 "use client";
 
 import React, { useEffect, useRef, useState } from "react";
 import { X, Clock, Check } from "lucide-react";
 
-type ProjectPayload = {
+export type QuotePayload = {
+  id?: string;
   name: string;
+  email?: string;
   description: string;
-  budget: number | null;
-  deadline: string; // ISO date (yyyy-mm-dd)
+  budget?: number | null;
+  deadline?: string | null; // yyyy-mm-dd
+  createdAt?: string;
+  status?: "pending" | "sent" | "accepted" | "rejected";
 };
 
 type Props = {
   open: boolean;
   onClose: () => void;
-  onCreate?: (payload: ProjectPayload) => Promise<void> | void;
+  onRequested?: (q: QuotePayload) => Promise<void> | void; // called after success
 };
 
+// Validation constants (tweak if you like)
+const DESCRIPTION_MIN = 10;
+const DESCRIPTION_MAX = 2000;
+const BUDGET_MIN = 0;
+const BUDGET_MAX = 5_000_000;
 const TWO_DAYS_IN_MS = 2 * 24 * 60 * 60 * 1000;
 
-// Validation limits (tweak as needed)
-const DESCRIPTION_MIN = 10;
-const DESCRIPTION_MAX = 1000;
-const BUDGET_MIN = 1; // minimum $1
-const BUDGET_MAX = 1_000_000; // maximum $1,000,000
-
-export default function CreateProjectModal({ open, onClose, onCreate }: Props) {
-  const [step, setStep] = useState(0); // 0: scope, 1: budget, 2: deadline
+export default function GetQuoteModal({ open, onClose, onRequested }: Props) {
+  const [step, setStep] = useState(0); // 0: contact, 1: scope, 2: budget/review
+  const [name, setName] = useState("");
+  const [email, setEmail] = useState("");
+  const [description, setDescription] = useState("");
+  const [budgetRaw, setBudgetRaw] = useState("");
+  const [deadline, setDeadline] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
-  const [name, setName] = useState("");
-  const [description, setDescription] = useState("");
   const descRef = useRef<HTMLTextAreaElement | null>(null);
-
-  const [budgetRaw, setBudgetRaw] = useState(""); // user input string
-  const [deadline, setDeadline] = useState("");
-
   const modalRef = useRef<HTMLDivElement | null>(null);
 
-  // compute min date for deadline (today + 2 days)
   const getMinDate = () => {
     const d = new Date(Date.now() + TWO_DAYS_IN_MS);
     const yyyy = d.getFullYear();
@@ -45,10 +47,9 @@ export default function CreateProjectModal({ open, onClose, onCreate }: Props) {
     const dd = String(d.getDate()).padStart(2, "0");
     return `${yyyy}-${mm}-${dd}`;
   };
-
   const minDeadline = getMinDate();
 
-  // auto-expand textarea
+  // autosize textarea
   useEffect(() => {
     const t = descRef.current;
     if (!t) return;
@@ -56,89 +57,80 @@ export default function CreateProjectModal({ open, onClose, onCreate }: Props) {
     t.style.height = `${t.scrollHeight}px`;
   }, [description]);
 
-  // reset when modal closed
+  // reset when modal closed / focus when opened
   useEffect(() => {
     if (!open) {
       setTimeout(() => {
         setStep(0);
-        setSubmitting(false);
         setName("");
+        setEmail("");
         setDescription("");
         setBudgetRaw("");
         setDeadline("");
-      }, 160); // allow closing animation
+        setSubmitting(false);
+      }, 160);
     } else {
-      // focus first input on open
       setTimeout(() => {
         const el = document.getElementById(
-          "project-name-input"
+          "quote-name"
         ) as HTMLInputElement | null;
         el?.focus();
       }, 120);
     }
   }, [open]);
 
-  // close on Escape
-  useEffect(() => {
-    function onKey(e: KeyboardEvent) {
-      if (e.key === "Escape") onClose();
-    }
-    if (open) window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [open, onClose]);
-
   // click outside to close
   useEffect(() => {
     function onDocClick(e: MouseEvent) {
       if (!open) return;
       if (!modalRef.current) return;
-      if (!modalRef.current.contains(e.target as Node)) {
-        onClose();
-      }
+      if (!modalRef.current.contains(e.target as Node)) onClose();
     }
     document.addEventListener("mousedown", onDocClick);
     return () => document.removeEventListener("mousedown", onDocClick);
   }, [open, onClose]);
 
-  // helper: parse budget string to number (handles commas)
   const parseBudget = (raw: string) => {
     const cleaned = raw.replace(/,/g, "").replace(/[^\d.]/g, "");
-    if (cleaned === "") return NaN;
+    if (!cleaned) return NaN;
     return Number(cleaned);
-  };
-
-  // simple validators (updated for description + budget limits)
-  const validateStep = (s: number) => {
-    if (s === 0) {
-      const nameOk = name.trim().length >= 2;
-      const descLen = description.trim().length;
-      const descOk = descLen >= DESCRIPTION_MIN && descLen <= DESCRIPTION_MAX;
-      return nameOk && descOk;
-    }
-    if (s === 1) {
-      if (budgetRaw.trim() === "") return false;
-      const val = parseBudget(budgetRaw);
-      if (isNaN(val)) return false;
-      if (!isFinite(val)) return false;
-      return val >= BUDGET_MIN && val <= BUDGET_MAX;
-    }
-    if (s === 2) {
-      if (!deadline) return false;
-      return deadline >= minDeadline;
-    }
-    return false;
   };
 
   const formattedBudget = () => {
     if (!budgetRaw) return "";
     const val = parseBudget(budgetRaw);
     if (isNaN(val)) return budgetRaw;
-    // show up to 2 decimal places (but drop .00)
-    const opts: Intl.NumberFormatOptions = {
+    return val.toLocaleString(undefined, {
       maximumFractionDigits: 2,
       minimumFractionDigits: 0,
-    };
-    return val.toLocaleString(undefined, opts);
+    });
+  };
+
+  const validEmail = (s: string) =>
+    s.trim() === "" ? true : /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s.trim());
+
+  // per-step validation
+  const validateStep = (s: number) => {
+    if (s === 0) {
+      // contact: name required, email optional but must be valid if present
+      return name.trim().length >= 2 && validEmail(email);
+    }
+    if (s === 1) {
+      // scope: description required within limits
+      const len = description.trim().length;
+      return len >= DESCRIPTION_MIN && len <= DESCRIPTION_MAX;
+    }
+    if (s === 2) {
+      // budget/deadline: budget optional but numeric and within limits; deadline optional but >= min
+      if (budgetRaw.trim()) {
+        const val = parseBudget(budgetRaw);
+        if (isNaN(val) || !isFinite(val)) return false;
+        if (val < BUDGET_MIN || val > BUDGET_MAX) return false;
+      }
+      if (deadline && deadline < minDeadline) return false;
+      return true;
+    }
+    return false;
   };
 
   const goNext = () => {
@@ -148,43 +140,40 @@ export default function CreateProjectModal({ open, onClose, onCreate }: Props) {
   const goBack = () => setStep((s) => Math.max(0, s - 1));
 
   const submit = async () => {
-    // final validation (ensure budget is within limits again)
+    // ensure final step valid
     if (!validateStep(2)) return;
-
-    const parsedBudget = budgetRaw.trim()
-      ? parseBudget(budgetRaw.trim().replace(/,/g, ""))
-      : NaN;
-
-    if (
-      budgetRaw.trim() &&
-      (isNaN(parsedBudget) ||
-        parsedBudget < BUDGET_MIN ||
-        parsedBudget > BUDGET_MAX)
-    ) {
-      alert(`Budget must be a number between ${BUDGET_MIN} and ${BUDGET_MAX}.`);
-      return;
-    }
-
     setSubmitting(true);
-    const payload: ProjectPayload = {
+
+    const payload: QuotePayload = {
+      id: `mock-${Date.now()}`,
       name: name.trim(),
+      email: email.trim() || undefined,
       description: description.trim(),
-      budget: budgetRaw.trim()
-        ? parseBudget(budgetRaw.replace(/,/g, ""))
-        : null,
-      deadline,
+      budget: budgetRaw.trim() ? parseBudget(budgetRaw) : null,
+      deadline: deadline || null,
+      createdAt: new Date().toISOString(),
+      status: "pending",
     };
+
     try {
-      await (onCreate
-        ? onCreate(payload)
-        : Promise.resolve(console.log("create payload:", payload)));
-      // little success animation (optional)
+      // *** REPLACE THIS MOCK WITH REAL API CALL ***
+      // Example:
+      // await fetch('/api/quotes', {
+      //   method: 'POST',
+      //   headers: { 'Content-Type': 'application/json' },
+      //   body: JSON.stringify(payload),
+      // });
+      await new Promise((r) => setTimeout(r, 900));
+      // *** END REPLACE ***
+
+      // notify parent so page can refresh
+      await (onRequested ? onRequested(payload) : Promise.resolve());
+      // reset & close
       setStep(0);
       onClose();
     } catch (err) {
-      console.error(err);
-      // show inline error or toast - keep it simple
-      alert("Unable to create project. Try again.");
+      console.error("Quote request failed", err);
+      alert("Failed to request quote. Try again.");
     } finally {
       setSubmitting(false);
     }
@@ -192,7 +181,7 @@ export default function CreateProjectModal({ open, onClose, onCreate }: Props) {
 
   if (!open) return null;
 
-  // derived UI error states for friendly messages
+  // derived UI states for friendly errors
   const descLen = description.trim().length;
   const descTooShort = descLen > 0 && descLen < DESCRIPTION_MIN;
   const descTooLong = descLen > DESCRIPTION_MAX;
@@ -203,40 +192,36 @@ export default function CreateProjectModal({ open, onClose, onCreate }: Props) {
   const budgetTooSmall = !budgetNaN && !budgetEmpty && budgetVal < BUDGET_MIN;
   const budgetTooLarge = !budgetNaN && !budgetEmpty && budgetVal > BUDGET_MAX;
 
-  // button states: 3 distinct visual states
-  const btnDisabled = !validateStep(step) || submitting;
-  const btnClass = submitting
+  const isValid = validateStep(step);
+  const btnDisabled = !isValid || submitting;
+  const primaryBtnClass = submitting
     ? "bg-blue-600 text-white"
-    : !validateStep(step)
+    : !isValid
     ? "bg-gray-100 text-gray-400 cursor-not-allowed"
     : "bg-blue-600 text-white hover:brightness-95";
 
   return (
-    // backdrop + center
     <div
-      className="fixed inset-0 z-60 flex items-center justify-center min-h-screen px-4 sm:px-6"
-      aria-modal="true"
-      role="dialog"
-      aria-label="Create project"
-    >
-      {/* dark overlay */}
+  className="fixed inset-0 z-9999 flex items-center justify-center min-h-screen px-4 sm:px-6"
+  aria-modal="true"
+  role="dialog"
+  aria-label="Request a quote"
+>
       <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" />
 
-      {/* modal panel */}
       <div
         ref={modalRef}
-        // ensure it's centered and doesn't shift up: use mx-auto and translate-y-0
         className="relative z-10 w-full max-w-2xl bg-white rounded-2xl shadow-2xl ring-1 ring-black/5 overflow-hidden transform translate-y-0 transition-all duration-200 mx-auto"
       >
-        {/* header + close */}
+        {/* header */}
         <div className="flex items-center gap-4 px-6 py-4 border-b">
           <div className="flex items-center gap-3">
             <div>
               <div className="text-lg font-semibold text-black">
-                Create Project
+                Request a Quote
               </div>
               <div className="text-sm text-gray-500">
-                A quick 3-step wizard to get started
+                A short 3-step form to get you a price
               </div>
             </div>
           </div>
@@ -256,7 +241,7 @@ export default function CreateProjectModal({ open, onClose, onCreate }: Props) {
         {/* steps indicator */}
         <div className="px-6 py-3 border-b">
           <div className="flex items-center gap-4">
-            {["Scope", "Budget", "Deadline"].map((label, i) => {
+            {["Contact", "Scope", "Budget"].map((label, i) => {
               const active = i === step;
               const done = i < step;
               return (
@@ -309,24 +294,23 @@ export default function CreateProjectModal({ open, onClose, onCreate }: Props) {
 
         {/* body */}
         <div className="px-6 py-6">
-          {/* Step 0: Scope */}
+          {/* Step 0: Contact */}
           {step === 0 && (
             <div className="space-y-4">
               <div>
                 <label
-                  htmlFor="project-name-input"
+                  htmlFor="quote-name"
                   className="block text-sm font-medium text-gray-700"
                 >
-                  Project name
+                  Your name
                 </label>
                 <input
-                  id="project-name-input"
-                  type="text"
+                  id="quote-name"
                   value={name}
                   onChange={(e) => setName(e.target.value)}
-                  placeholder="e.g. E-commerce revamp"
+                  placeholder="e.g. Jane Doe"
+                  className="mt-2 block w-full rounded-md border px-3 py-2 text-black focus:outline-none focus:ring-2 focus:ring-blue-300"
                   maxLength={100}
-                  className="mt-2 block w-full rounded-md border px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-300 text-black"
                 />
                 {name.trim().length > 0 && name.trim().length < 2 && (
                   <div className="mt-1 text-xs text-red-600">
@@ -337,37 +321,57 @@ export default function CreateProjectModal({ open, onClose, onCreate }: Props) {
 
               <div>
                 <label
-                  htmlFor="project-desc"
+                  htmlFor="quote-email"
+                  className="block text-sm font-medium text-gray-700"
+                >
+                  Email (optional)
+                </label>
+                <input
+                  id="quote-email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="you@company.com"
+                  className="mt-2 block w-full rounded-md border px-3 py-2 text-black focus:outline-none focus:ring-2 focus:ring-blue-300"
+                />
+                {!validEmail(email) && (
+                  <div className="mt-1 text-xs text-red-600">
+                    Invalid email address.
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Step 1: Scope */}
+          {step === 1 && (
+            <div className="space-y-4">
+              <div>
+                <label
+                  htmlFor="quote-desc"
                   className="block text-sm font-medium text-gray-700"
                 >
                   Project description
                 </label>
                 <textarea
-                  id="project-desc"
+                  id="quote-desc"
                   ref={descRef}
                   value={description}
                   onChange={(e) => setDescription(e.target.value)}
-                  placeholder="Describe the goals, scope or anything important. This field will expand as you type."
-                  rows={2}
+                  placeholder="Describe the goals, deliverables, timeline, etc."
+                  rows={4}
                   maxLength={DESCRIPTION_MAX}
-                  aria-invalid={descTooShort || descTooLong}
-                  className="mt-2 block w-full rounded-md border px-3 py-2 resize-none overflow-hidden focus:outline-none focus:ring-2 focus:ring-blue-300 text-black"
+                  className="mt-2 block w-full rounded-md border px-3 py-2 resize-none overflow-hidden text-black focus:outline-none focus:ring-2 focus:ring-blue-300"
                 />
                 <div className="mt-2 flex items-center justify-between text-sm">
                   <div>
                     {descTooShort && (
                       <span className="text-xs text-red-600">
-                        Description is too short (min {DESCRIPTION_MIN} chars).
+                        Description too short (min {DESCRIPTION_MIN}).
                       </span>
                     )}
                     {descTooLong && (
                       <span className="text-xs text-red-600">
-                        Description is too long (max {DESCRIPTION_MAX} chars).
-                      </span>
-                    )}
-                    {!descTooShort && !descTooLong && (
-                      <span className="text-xs text-gray-500">
-                        Describe the goals, scope or anything important.
+                        Description too long (max {DESCRIPTION_MAX}).
                       </span>
                     )}
                   </div>
@@ -379,49 +383,38 @@ export default function CreateProjectModal({ open, onClose, onCreate }: Props) {
             </div>
           )}
 
-          {/* Step 1: Budget */}
-          {step === 1 && (
+          {/* Step 2: Budget & Review */}
+          {step === 2 && (
             <div className="space-y-4">
               <div>
                 <label
-                  htmlFor="budget-input"
+                  htmlFor="quote-budget"
                   className="block text-sm font-medium text-gray-700"
                 >
-                  Budget (USD)
+                  Budget (USD, optional)
                 </label>
                 <div className="mt-2 relative">
                   <input
-                    id="budget-input"
+                    id="quote-budget"
                     inputMode="numeric"
                     value={budgetRaw}
-                    onChange={(e) => {
-                      // allow numbers, commas, dot
-                      const allowed = e.target.value.replace(/[^\d.,]/g, "");
-                      setBudgetRaw(allowed);
-                    }}
-                    placeholder="e.g. 1,000"
-                    maxLength={15}
-                    aria-invalid={budgetNaN || budgetTooSmall || budgetTooLarge}
-                    className="block w-full rounded-md border px-3 py-2 pr-12 focus:outline-none focus:ring-2 focus:ring-blue-300 text-black"
+                    onChange={(e) =>
+                      setBudgetRaw(e.target.value.replace(/[^\d.,]/g, ""))
+                    }
+                    placeholder="e.g. 2,500"
+                    className="block w-full rounded-md border px-3 py-2 pr-12 text-black focus:outline-none focus:ring-2 focus:ring-blue-300"
                   />
-                  {/* trailing dollar sign */}
                   <div className="absolute right-2 top-1/2 -translate-y-1/2 text-sm text-gray-600 px-2">
                     $
                   </div>
                 </div>
-                <div className="mt-2 text-sm text-gray-500">
+                <div className="mt-1 text-xs text-gray-500">
                   Formatted:{" "}
                   <span className="font-medium">
                     {formattedBudget() || "—"}
                   </span>
                 </div>
-
                 <div className="mt-2 text-sm">
-                  {budgetEmpty && (
-                    <div className="text-xs text-gray-500">
-                      Enter an approximate budget in USD.
-                    </div>
-                  )}
                   {budgetNaN && (
                     <div className="text-xs text-red-600">Invalid number.</div>
                   )}
@@ -432,48 +425,29 @@ export default function CreateProjectModal({ open, onClose, onCreate }: Props) {
                   )}
                   {budgetTooLarge && (
                     <div className="text-xs text-red-600">
-                      Budget must be less than or equal to ${BUDGET_MAX}.
+                      Budget must be ≤ ${BUDGET_MAX.toLocaleString()}.
                     </div>
                   )}
-                  {!budgetEmpty &&
-                    !budgetNaN &&
-                    !budgetTooSmall &&
-                    !budgetTooLarge && (
-                      <div className="text-xs text-gray-500">
-                        Allowed range: ${BUDGET_MIN.toLocaleString()} — $
-                        {BUDGET_MAX.toLocaleString()}.
-                      </div>
-                    )}
                 </div>
               </div>
-            </div>
-          )}
 
-          {/* Step 2: Deadline */}
-          {step === 2 && (
-            <div className="space-y-4">
               <div>
                 <label
-                  htmlFor="deadline-input"
+                  htmlFor="quote-deadline"
                   className="block text-sm font-medium text-gray-700"
                 >
-                  Deadline
+                  Preferred deadline (optional)
                 </label>
                 <div className="mt-2 flex items-center gap-3">
                   <Clock className="text-gray-600" />
                   <input
-                    id="deadline-input"
+                    id="quote-deadline"
                     type="date"
-                    value={deadline}
                     min={minDeadline}
+                    value={deadline}
                     onChange={(e) => setDeadline(e.target.value)}
                     className="rounded-md border px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-300 text-black"
                   />
-                </div>
-                <div className="mt-2 text-sm text-gray-500">
-                  Minimum deadline is{" "}
-                  <span className="font-medium">{minDeadline}</span> (2 days
-                  from today).
                 </div>
                 {deadline && deadline < minDeadline && (
                   <div className="mt-1 text-xs text-red-600">
@@ -481,11 +455,37 @@ export default function CreateProjectModal({ open, onClose, onCreate }: Props) {
                   </div>
                 )}
               </div>
+
+              {/* Review block */}
+              <div className="pt-2 border-t">
+                <div className="text-sm text-gray-600 mb-2">Review</div>
+                <div className="bg-gray-50 rounded p-3 text-sm text-gray-800">
+                  <div className="font-medium">{name || "—"}</div>
+                  {email && (
+                    <div className="text-xs text-gray-600">{email}</div>
+                  )}
+                  <div className="mt-2">{description || "—"}</div>
+                  <div className="mt-2 flex gap-3 text-xs">
+                    <div>
+                      Budget:{" "}
+                      <span className="font-medium">
+                        {budgetRaw ? `$${formattedBudget()}` : "Not specified"}
+                      </span>
+                    </div>
+                    <div>
+                      Deadline:{" "}
+                      <span className="font-medium">
+                        {deadline || "Not specified"}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              </div>
             </div>
           )}
         </div>
 
-        {/* footer / actions */}
+        {/* footer */}
         <div className="px-6 py-4 border-t flex items-center justify-between gap-3">
           <div className="flex items-center gap-2">
             {step > 0 && (
@@ -499,18 +499,13 @@ export default function CreateProjectModal({ open, onClose, onCreate }: Props) {
 
             <button
               onClick={() => {
-                // Skip to next or submit
-                if (step < 2) {
-                  goNext();
-                } else {
-                  submit();
-                }
+                if (step < 2) goNext();
+                else submit();
               }}
               disabled={btnDisabled}
-              className={`inline-flex items-center gap-2 px-4 py-2 rounded-md transition ${btnClass}`}
+              className={`inline-flex items-center gap-2 px-4 py-2 rounded-md transition ${primaryBtnClass}`}
             >
               {submitting && (
-                // small spinner — stays visible against blue bg
                 <svg
                   className="animate-spin -ml-1 mr-2 h-4 w-4 text-white"
                   xmlns="http://www.w3.org/2000/svg"
@@ -535,15 +530,15 @@ export default function CreateProjectModal({ open, onClose, onCreate }: Props) {
               {step < 2
                 ? "Next"
                 : submitting
-                ? "Creating..."
-                : "Create Project"}
+                ? "Requesting..."
+                : "Request Quote"}
             </button>
           </div>
 
           <div className="text-sm text-gray-500">
-            {step === 0 && "Step 1: Describe the scope"}
-            {step === 1 && "Step 2: Set your budget"}
-            {step === 2 && "Step 3: Pick a deadline"}
+            {step === 0 && "Step 1: Contact info"}
+            {step === 1 && "Step 2: Describe the scope"}
+            {step === 2 && "Step 3: Budget & review"}
           </div>
         </div>
       </div>

@@ -5,6 +5,7 @@ import toast from "react-hot-toast";
 import { useRouter } from "next/navigation";
 import type { AuthTokenPayload } from "@/app/utils/token";
 import CreateProjectModal from "../ui/CreateProjectModal";
+import GetQuoteModal, { QuotePayload } from "@/app/components/Quote/GetQuoteModal";
 import {
   Plus,
   Search,
@@ -37,16 +38,21 @@ export default function DashboardPageClient({ user, needsRefresh }: Props) {
   const [loading, setLoading] = useState<boolean>(false);
   const [retryCount, setRetryCount] = useState(0);
   const [failed, setFailed] = useState(false);
-
+  const [modalOpen, setModalOpen] = useState(false);
   const MAX_RETRIES = 2;
   const [open, setOpen] = useState(false);
-
+const [quote, setQuote] = useState<QuotePayload | null>(null);
   const onCreate = async (payload: any) => {
     // fake async API call
     await new Promise((res) => setTimeout(res, 700));
     console.log("Create:", payload);
     toast.success("Project created!");
     // optionally navigate or refresh
+  };
+  const onRequested = async (q: QuotePayload) => {
+    // In real app: you might POST then re-fetch or use returned object.
+    // For now we just set local state to the created mock.
+    setQuote(q);
   };
   // session refresh logic
   useEffect(() => {
@@ -397,13 +403,17 @@ export default function DashboardPageClient({ user, needsRefresh }: Props) {
 
             <div className="flex flex-col gap-2">
               <button
-                onClick={() => router.push("/dashboard/quotes/new")}
+                onClick={() => setModalOpen(true)}
                 className="w-full inline-flex items-center justify-between gap-2 px-3 py-2 rounded-md border hover:bg-gray-200  bg-transparent transition-all "
               >
                 <span className="text-gray-900">Request a New Quote</span>
                 <ChevronRight size={16} />
               </button>
-
+              <GetQuoteModal
+                open={modalOpen}
+                onClose={() => setModalOpen(false)}
+                onRequested={onRequested}
+              />
               <button
                 onClick={() => setOpen(true)}
                 className="w-full inline-flex items-center justify-between gap-2 px-3 py-2 rounded-md bg-blue-600 text-white  transition"
