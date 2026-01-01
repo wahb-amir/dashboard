@@ -1,14 +1,14 @@
 // app/utils/mongodb.ts
 import mongoose from "mongoose";
 
-
 declare global {
   // allow caching across hot reloads in dev
   // eslint-disable-next-line no-var
   var __mongo_cache__:
     | {
-        conn: mongoose.Mongoose | null;
-        promise: Promise<mongoose.Mongoose | null> | null;
+        // `typeof mongoose` matches what mongoose.connect() resolves to
+        conn: typeof mongoose | null;
+        promise: Promise<typeof mongoose> | null;
       }
     | undefined;
 }
@@ -19,10 +19,11 @@ function getEnvVar(name: string): string | undefined {
   return process.env[name];
 }
 
+// return the mongoose module object
 export default async function connectToDatabase(opts?: {
   retries?: number;
   retryDelayMs?: number;
-}): Promise<mongoose.Mongoose> {
+}): Promise<typeof mongoose> {
   const MONGODB_URI = process.env.MONGODB_URI ?? getEnvVar("MONGODB_URI");
   const DB_NAME = process.env.DB_NAME ?? getEnvVar("DB_NAME") ?? DEFAULT_DB;
 
@@ -36,10 +37,12 @@ export default async function connectToDatabase(opts?: {
     global.__mongo_cache__ = { conn: null, promise: null };
   }
 
+  // if already connected, return the existing connection
   if (global.__mongo_cache__.conn) {
     return global.__mongo_cache__.conn!;
   }
 
+  // if a connect attempt is in progress, reuse the promise
   if (global.__mongo_cache__.promise) {
     return global.__mongo_cache__.promise!;
   }
@@ -47,7 +50,7 @@ export default async function connectToDatabase(opts?: {
   const retries = opts?.retries ?? 3;
   const retryDelayMs = opts?.retryDelayMs ?? 1000;
 
-  const connectWithRetry = async (): Promise<mongoose.Mongoose> => {
+  const connectWithRetry = async (): Promise<typeof mongoose> => {
     // Updated connect options — removed useNewUrlParser/useUnifiedTopology
     const connectOptions: mongoose.ConnectOptions = {
       dbName: DB_NAME,
@@ -59,11 +62,9 @@ export default async function connectToDatabase(opts?: {
 
     for (let attempt = 1; attempt <= retries; attempt++) {
       try {
-        console.log(
-          `[mongo] connecting to (db: ${DB_NAME}) attempt ${attempt}`
-        );
+        console.log(`[mongo] connecting to (db: ${DB_NAME}) attempt ${attempt}`);
         const conn = await mongoose.connect(MONGODB_URI, connectOptions);
-        // mongoose.connect returns mongoose.Mongoose
+        // mongoose.connect returns the mongoose module object (typeof mongoose)
         global.__mongo_cache__!.conn = conn;
         global.__mongo_cache__!.promise = null;
         console.log("[mongo] connected");
