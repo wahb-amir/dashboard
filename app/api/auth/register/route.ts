@@ -176,18 +176,19 @@ export async function POST(request: NextRequest): Promise<Response> {
     }
 
     // create and save user (pre-save hook hashes password)
+
     const userDoc = new User({
       name: name.trim(),
       email: emailLower,
       password: password,
       role: "client",
+      company: company ? company : false,
     });
 
     const saved = await userDoc.save();
 
     const newUserId = saved._id?.toString();
 
-    // clear counters (no-op if redis missing)
     await Promise.all([
       safeDel(keyIp),
       keyEmail ? safeDel(keyEmail) : Promise.resolve(),
@@ -199,12 +200,14 @@ export async function POST(request: NextRequest): Promise<Response> {
       email: emailLower,
       role: "client",
       name: name.trim(),
+      company: company ? company : false,
     });
     const refreshToken = generateToken({
       uid: newUserId,
       email: emailLower,
       role: "client",
       name: name.trim(),
+      company: company ? company : false,
     });
 
     const res = Response.json(
@@ -258,7 +261,6 @@ export async function POST(request: NextRequest): Promise<Response> {
       const ip =
         request.headers.get("x-forwarded-for")?.split(",")?.[0]?.trim() ||
         "unknown_ip";
-      // safe increment on error path as well
       await safeIncr(`register:ip:${ip}`);
       await safeExpire(`register:ip:${ip}`, 60 * 5);
     } catch (e) {

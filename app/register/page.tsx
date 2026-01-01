@@ -25,7 +25,12 @@ const REFRESH_BEFORE_MS = 60 * 1000;
 
 const STORAGE_KEY = "appToken_record";
 
+function isSessionAvailable(): boolean {
+  return typeof window !== "undefined" && !!window.sessionStorage;
+}
+
 function setSessionToken(token: string, ttlMs = DEFAULT_TTL_MS) {
+  if (!isSessionAvailable()) return;
   try {
     const record = { token, expiry: Date.now() + ttlMs };
     sessionStorage.setItem(STORAGE_KEY, JSON.stringify(record));
@@ -35,6 +40,7 @@ function setSessionToken(token: string, ttlMs = DEFAULT_TTL_MS) {
 }
 
 function getSessionTokenRecord(): { token: string; expiry: number } | null {
+  if (!isSessionAvailable()) return null;
   try {
     const raw = sessionStorage.getItem(STORAGE_KEY);
     if (!raw) return null;
@@ -42,20 +48,27 @@ function getSessionTokenRecord(): { token: string; expiry: number } | null {
     if (!rec || typeof rec.token !== "string" || typeof rec.expiry !== "number")
       throw new Error("invalid record");
     if (Date.now() > rec.expiry) {
-      sessionStorage.removeItem(STORAGE_KEY);
+      try {
+        sessionStorage.removeItem(STORAGE_KEY);
+      } catch {}
       return null;
     }
     return rec;
   } catch (e) {
-    sessionStorage.removeItem(STORAGE_KEY);
+    try {
+      sessionStorage.removeItem(STORAGE_KEY);
+    } catch {}
     return null;
   }
 }
 
 function removeSessionToken() {
+  if (!isSessionAvailable()) return;
   try {
     sessionStorage.removeItem(STORAGE_KEY);
-  } catch {}
+  } catch (e) {
+    console.error("Failed to remove session token", e);
+  }
 }
 
 export default function SignupPagePlain() {
@@ -77,12 +90,14 @@ export default function SignupPagePlain() {
 
   // App token state + loading derived from session record
   const [appToken, setAppToken] = useState<string | null>(() => {
+    if (!isSessionAvailable()) return null;
     const rec = getSessionTokenRecord();
     return rec ? rec.token : null;
   });
-  const [loadingApp, setLoadingApp] = useState<boolean>(() =>
-    getSessionTokenRecord() ? false : true
-  );
+  const [loadingApp, setLoadingApp] = useState<boolean>(() => {
+    if (!isSessionAvailable()) return true; // assume loading in SSR/initial render
+    return getSessionTokenRecord() ? false : true;
+  });
 
   // in-memory lock/promise to avoid concurrent token fetches
   const fetchingRef = useRef<Promise<string | null> | null>(null);
@@ -212,6 +227,15 @@ export default function SignupPagePlain() {
   useEffect(() => {
     let mounted = true;
     async function init() {
+      // only run browser APIs on client
+      if (!isSessionAvailable()) {
+        // attempt to fetch token on client even if SSR initial state was used
+        if (typeof window !== "undefined") {
+          await ensureValidAppToken();
+        }
+        return;
+      }
+
       const rec = getSessionTokenRecord();
       if (rec) {
         if (!mounted) return;
@@ -295,9 +319,13 @@ export default function SignupPagePlain() {
         toast.success("Account created — welcome ");
         router.push("/dashboard");
         // trigger navbar to update auth state
-        window.dispatchEvent(new Event("auth-change"));
-        // cross-tab: (writes to localStorage to trigger 'storage' across tabs)
-        localStorage.setItem("auth:updated", Date.now().toString());
+        if (typeof window !== "undefined") {
+          window.dispatchEvent(new Event("auth-change"));
+          // cross-tab: (writes to localStorage to trigger 'storage' across tabs)
+          try {
+            localStorage.setItem("auth:updated", Date.now().toString());
+          } catch {}
+        }
         return;
       }
 

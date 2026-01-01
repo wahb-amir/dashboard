@@ -96,9 +96,9 @@ export default function Navbar({
 
             <div className="flex-1" />
 
-            {/* Mobile actions */}
+            {/* Mobile actions (visible <880px) */}
             <nav
-              className="flex items-center space-x-2 md:hidden"
+              className="bp-mobile-nav flex items-center space-x-2 md:hidden"
               aria-label="Primary"
             >
               {showSidebar && (
@@ -114,7 +114,7 @@ export default function Navbar({
               {!showSidebar && (
                 <Link
                   href="/about"
-                  className="text-base inline-flex items-center px-3 py-1 rounded-md bg-transparent text-black hover:bg-gray-100 transition"
+                  className="text-base inline-flex items-center px-3 py-1 rounded-md bg-gray-100 text-black hover:bg-gray-100 transition"
                 >
                   About
                 </Link>
@@ -131,7 +131,7 @@ export default function Navbar({
                 <>
                   <Link
                     href="/login"
-                    className="inline-flex items-center px-3 py-1 text-sm rounded-md font-medium text-black hover:text-gray-900 transition"
+                    className="inline-flex items-center px-3 py-1 text-sm rounded-md font-medium text-black hover:text-gray-900 transition bg-gray-100"
                   >
                     Log In
                   </Link>
@@ -145,15 +145,15 @@ export default function Navbar({
               )}
             </nav>
 
-            {/* Desktop nav */}
+            {/* Desktop nav (visible >=880px) */}
             <nav
-              className="hidden md:flex items-center space-x-3"
+              className="bp-desktop-nav hidden md:flex items-center space-x-3"
               aria-label="Primary"
             >
               {!showSidebar && (
                 <Link
                   href="/about"
-                  className="text-lg inline-flex items-center px-3 py-1 rounded-md bg-transparent text-black hover:bg-gray-100 transition"
+                  className="text-lg inline-flex items-center px-3 py-1 rounded-md bg-gray-100 text-black hover:bg-gray-100 transition"
                 >
                   About
                 </Link>
@@ -163,7 +163,7 @@ export default function Navbar({
                 <>
                   <Link
                     href="/login"
-                    className="inline-flex items-center px-3 py-1.5 text-sm rounded-md font-medium text-black hover:text-gray-900 transition"
+                    className="inline-flex items-center px-3 py-1.5 text-sm rounded-md font-medium text-black hover:text-gray-900 transition bg-gray-100"
                   >
                     Log In
                   </Link>
@@ -213,6 +213,26 @@ export default function Navbar({
           </div>
         </div>
       </header>
+
+      <style jsx>{`
+        /* default: mobile nav visible, desktop nav hidden */
+        .bp-mobile-nav {
+          display: flex;
+        }
+        .bp-desktop-nav {
+          display: none;
+        }
+
+        /* >= 880px -> show desktop nav, hide mobile nav */
+        @media (min-width: 880px) {
+          .bp-mobile-nav {
+            display: none !important;
+          }
+          .bp-desktop-nav {
+            display: flex !important;
+          }
+        }
+      `}</style>
     </>
   );
 }

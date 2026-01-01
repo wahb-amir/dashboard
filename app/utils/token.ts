@@ -47,7 +47,14 @@ export interface GenerateTokenOptions {
 export interface VerifyResult {
   decoded: AuthTokenPayload;
 }
-
+export type DecodedToken = {
+  uid: string;
+  email: string;
+  role: string;
+  name?: string;
+  company?: string;
+  [k: string]: any;
+};
 /**
  * Function types (exported so other modules can reference them)
  */
@@ -154,7 +161,7 @@ export const verifyToken: VerifyTokenFn = (token, type = "AUTH") => {
 
     return { decoded };
   } catch (err) {
-    console.log(err)
+    console.log(err);
     return null;
   }
 };

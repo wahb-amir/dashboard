@@ -4,6 +4,7 @@ import validator from "validator";
 import connectToMongoose from "@/app/utils/mongodb";
 import User from "@/app/models/User";
 import { verifyToken, generateToken } from "@/app/utils/token";
+import type { DecodedToken } from "@/app/utils/token";
 import { verifyPassword } from "@/app/utils/hash";
 import redis from "@/app/utils/redis";
 
@@ -12,13 +13,7 @@ type LoginBody = {
   password?: unknown;
 };
 
-type DecodedToken = {
-  uid?: string;
-  email?: string;
-  role?: string;
-  name?: string;
-  [k: string]: any;
-};
+
 
 // Safe redis helpers (no-op when redis missing)
 const safeGet = (key: string): Promise<string | null> =>
@@ -134,14 +129,16 @@ export async function POST(request: NextRequest): Promise<Response> {
       uid: userId,
       email: user.email,
       role: user.role || "client",
-      name: user.name || " ",
+      name: user.name || "",
+      company: user.company || "",
     });
     const refreshToken = generateToken(
       {
         uid: userId,
         email: user.email,
         role: user.role || "client",
-        name: user.name || " ",
+        name: user.name || "",
+        company: user.company || "",
       },
       "AUTH",
       { expiresIn: "7d" }

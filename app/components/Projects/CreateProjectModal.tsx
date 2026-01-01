@@ -3,11 +3,11 @@
 import React, { useEffect, useRef, useState } from "react";
 import { X, Clock, Check } from "lucide-react";
 
-type ProjectPayload = {
+  type ProjectPayload = {
   name: string;
   description: string;
   budget: number | null;
-  deadline: string; // ISO date (yyyy-mm-dd)
+  deadline: string; 
 };
 
 type Props = {
@@ -175,10 +175,17 @@ export default function CreateProjectModal({ open, onClose, onCreate }: Props) {
       deadline,
     };
     try {
-      await (onCreate
-        ? onCreate(payload)
-        : Promise.resolve(console.log("create payload:", payload)));
-      // little success animation (optional)
+      const server = await fetch("/api/project", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body:JSON.stringify(payload)
+      });
+
+      const res = await server.json();
+
+      
       setStep(0);
       onClose();
     } catch (err) {
@@ -214,7 +221,7 @@ export default function CreateProjectModal({ open, onClose, onCreate }: Props) {
   return (
     // backdrop + center
     <div
-      className="fixed inset-0 z-60 flex items-center justify-center min-h-screen px-4 sm:px-6"
+      className="fixed inset-0 z-9999 flex items-center justify-center min-h-screen px-4 sm:px-6"
       aria-modal="true"
       role="dialog"
       aria-label="Create project"
