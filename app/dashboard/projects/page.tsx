@@ -201,7 +201,7 @@ export default function DashboardProjectsPage({
 
   return (
     <div className="max-w-7xl mx-auto p-4">
-      {/* header: mobile stacked, at >=880px becomes a row (bp-header) */}
+      {/* header: mobile stacked, at >=980px becomes a row (bp-header) */}
       <div className="flex flex-col bp-header gap-4 mb-6">
         <div>
           <h1 className="text-2xl font-bold text-black">Projects</h1>
@@ -210,8 +210,8 @@ export default function DashboardProjectsPage({
           </p>
         </div>
 
-        <div className="flex items-center gap-3">
-          <div className="relative bp-input-wrapper">
+        <div className="flex items-center gap-3 header-actions">
+          <div className="relative bp-input-wrapper flex-shrink-0">
             <Search
               size={16}
               className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500"
@@ -222,24 +222,27 @@ export default function DashboardProjectsPage({
               placeholder="Search projects..."
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              className="pl-10 pr-3 py-2 rounded-md border bg-white shadow-sm w-[220px] focus:outline-none focus:ring-2 focus:ring-blue-300 text-gray-900 placeholder:text-gray-500"
+              className="pl-10 pr-3 py-2 rounded-md border bg-white shadow-sm w-full max-w-[320px] focus:outline-none focus:ring-2 focus:ring-blue-300 text-gray-900 placeholder:text-gray-500"
             />
           </div>
 
-          <button
-            onClick={() => setQuoteOpen(true)}
-            className="inline-flex items-center gap-2 px-3 py-2 rounded-md border bg-transparent hover:bg-gray-50 text-black"
-          >
-            Request Quote
-            <ChevronRight size={14} />
-          </button>
+          <div className="flex items-center gap-2 actions">
+            <button
+              onClick={() => setQuoteOpen(true)}
+              className="inline-flex items-center gap-2 px-2 py-1.5 rounded-md border bg-transparent hover:bg-gray-50 text-black text-sm whitespace-nowrap"
+            >
+              Request Quote
+              <ChevronRight size={14} />
+            </button>
 
-          <button
-            onClick={() => setOpenCreate(true)}
-            className="inline-flex items-center gap-2 px-3 py-2 rounded-md bg-blue-600 text-white font-semibold hover:brightness-95 transition"
-          >
-            <Plus size={16} /> New Project
-          </button>
+            <button
+              onClick={() => setOpenCreate(true)}
+              className="inline-flex items-center gap-2 px-2 py-1.5 rounded-md bg-blue-600 text-white font-semibold hover:brightness-95 transition text-sm whitespace-nowrap"
+            >
+              <Plus size={16} /> New Project
+            </button>
+          </div>
+
           <CreateProjectModal
             open={openCreate}
             onClose={() => setOpenCreate(false)}
@@ -253,7 +256,7 @@ export default function DashboardProjectsPage({
         </div>
       </div>
 
-      {/* projects grid: 1 column on small screens, 2 columns at >=880px via bp-grid */}
+      {/* projects grid: 1 column on small screens, 2 columns at >=980px via bp-grid */}
       <div className="grid grid-cols-1 bp-grid gap-6">
         {projectsLoading ? (
           // show 4 skeleton cards while loading (responsive)
@@ -300,25 +303,40 @@ export default function DashboardProjectsPage({
       </div>
 
       <style jsx>{`
-        /* default (mobile): header stacks and input width is 220px; grid is single column */
+        /* default (mobile): header stacks and input is full width up to max-width; grid is single column */
         .bp-header {
           flex-direction: column;
           align-items: stretch;
           justify-content: flex-start;
         }
 
-        /* at >=880px we want the header to act like md:flex-row / md:items-center / md:justify-between */
+        .header-actions {
+          display: flex;
+          gap: 0.5rem;
+          align-items: center;
+          flex-wrap: wrap; /* allow actions to wrap instead of overflowing */
+        }
+
+        .actions {
+          display: flex;
+          gap: 0.5rem;
+          align-items: center;
+          flex-wrap: wrap;
+        }
+
+        .actions > * {
+          flex: 0 1 auto; /* don't force buttons to stretch */
+        }
+
+        /* at >=980px we want the header to act like a row with space-between */
         @media (min-width: 980px) {
           .bp-header {
             flex-direction: row;
             align-items: center;
             justify-content: space-between;
           }
-          /* make the input wider at the 880px breakpoint (matches md:w-[320px] from before) */
-          .bp-input-wrapper input {
-            width: 320px;
-          }
-          /* make the projects grid 2 columns at the 880px breakpoint */
+
+          /* make the projects grid 2 columns at the 980px breakpoint */
           .bp-grid {
             grid-template-columns: repeat(2, minmax(0, 1fr));
           }

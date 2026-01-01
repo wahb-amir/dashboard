@@ -101,24 +101,20 @@ export default function ProjectDetailPage({ id }: { id: string }) {
 
         if (controller.signal.aborted || cancelled) return;
 
-        // AUTH -> go to login (avoid bouncing to list)
         if (res.status === 401) {
           toast.error("Please sign in to view that project.");
           router.push("/login?reason=auth");
           return;
         }
 
-        // Not found -> back to list
         if (res.status === 404) {
           toast.error("Project not found.");
           router.push("/dashboard/projects");
           return;
         }
 
-        // Try to parse body safely
         const data = await res.json().catch(() => null);
 
-        // Other non-ok statuses: show error UI (do not redirect automatically)
         if (!res.ok) {
           const msg =
             (data && (data.message || data.error)) ||
@@ -128,12 +124,10 @@ export default function ProjectDetailPage({ id }: { id: string }) {
           return;
         }
 
-        // accept either object or { project: obj }
         const fetched: ProjectFromDB | null =
           (data && (data.project ?? data)) ?? null;
 
         if (!fetched) {
-          // treat as an error and show retry/back UI
           const msg = "Project data missing from server response.";
           console.error("Project fetch error: missing project");
           setError(msg);
@@ -156,7 +150,6 @@ export default function ProjectDetailPage({ id }: { id: string }) {
       cancelled = true;
       controller.abort();
     };
-    // include reloadKey so Retry actually refetches
   }, [id, reloadKey, router]);
 
   const { totalSteps, completedSteps, progress } = useMemo(() => {
@@ -211,7 +204,6 @@ export default function ProjectDetailPage({ id }: { id: string }) {
 
   if (loading) return <PageSkeleton />;
 
-  // show error UI and avoid auto-redirect loops
   if (error) {
     return (
       <div className="max-w-6xl mx-auto p-6">
@@ -239,7 +231,6 @@ export default function ProjectDetailPage({ id }: { id: string }) {
     );
   }
 
-  // If we have no project (and no error), show not-found UI — but do NOT auto-redirect
   if (!project) {
     return (
       <div className="max-w-6xl mx-auto p-6">
@@ -277,11 +268,11 @@ export default function ProjectDetailPage({ id }: { id: string }) {
   return (
     <div className="max-w-6xl mx-auto p-6">
       {/* header */}
-      <div className="flex items-center justify-between gap-4 mb-6">
+      <div className="flex items-center justify-between gap-4 mb-6 page-header">
         <div className="flex items-center gap-4">
           <button
             onClick={() => router.push("/dashboard/projects")}
-            className="inline-flex items-center gap-2 px-3 py-2 rounded-md text-sm bg-blue-500 border hover:bg-blue-600 text-white "
+            className="inline-flex items-center gap-2 px-2.5 py-1.5 rounded-md text-sm bg-blue-500 border hover:bg-blue-600 text-white "
             aria-label="Back to projects"
           >
             <ArrowLeft size={16} className="text-white" /> Back
@@ -303,25 +294,25 @@ export default function ProjectDetailPage({ id }: { id: string }) {
           </div>
         </div>
 
-        <div className="flex items-center gap-3">
-          <div className="text-right mr-4">
+        <div className="flex items-center gap-3 header-actions">
+          <div className="text-right mr-2 flex-shrink-0 w-20">
             <div className="text-xs text-gray-500">Progress</div>
             <div className="text-lg font-semibold text-gray-900">
               {progress}%
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
             <button
               onClick={handleEdit}
-              className="inline-flex items-center gap-2 px-3 py-2 rounded-md bg-white border hover:bg-gray-50 text-black"
+              className="inline-flex items-center gap-2 px-2.5 py-1.5 rounded-md bg-white border hover:bg-gray-50 text-black text-sm whitespace-nowrap"
             >
               <Edit2 size={14} className="text-black" /> Edit
             </button>
             <button
               onClick={handleDelete}
               disabled={deleting}
-              className="inline-flex items-center gap-2 px-3 py-2 rounded-md bg-red-600 text-white hover:bg-red-700"
+              className="inline-flex items-center gap-2 px-2.5 py-1.5 rounded-md bg-red-600 text-white hover:bg-red-700 text-sm whitespace-nowrap"
             >
               <Trash2 size={14} /> {deleting ? "Deleting…" : "Delete"}
             </button>
@@ -329,9 +320,9 @@ export default function ProjectDetailPage({ id }: { id: string }) {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 gap-6 break-980">
         {/* main column */}
-        <main className="lg:col-span-2 space-y-6">
+        <main className="main-col space-y-6">
           {/* description card */}
           <section className="bg-white rounded-lg shadow-sm border p-6">
             <div className="flex items-start justify-between">
@@ -436,7 +427,7 @@ export default function ProjectDetailPage({ id }: { id: string }) {
         </main>
 
         {/* sidebar */}
-        <aside className="space-y-6">
+        <aside className="aside-col space-y-6">
           <div className="bg-white rounded-lg shadow-sm border p-4">
             <div className="flex items-center justify-between">
               <div>
@@ -557,6 +548,83 @@ export default function ProjectDetailPage({ id }: { id: string }) {
           </div>
         </aside>
       </div>
+
+      <style jsx>{`
+        /* custom breakpoint: switch to stacked (mobile) at 980px */
+        .break-980 {
+          display: grid;
+          grid-template-columns: repeat(3, minmax(0, 1fr));
+          gap: 1.5rem;
+        }
+        .break-980 .main-col {
+          grid-column: span 2;
+        }
+        .break-980 .aside-col {
+          grid-column: span 1;
+        }
+
+        /* header helpers */
+        .page-header {
+          display: flex;
+          flex-direction: row;
+          align-items: center;
+        }
+        .header-actions {
+          display: flex;
+          align-items: center;
+          gap: 0.5rem;
+        }
+
+        /* mobile adjustments at 980px and below */
+        @media (max-width: 980px) {
+          .break-980 {
+            grid-template-columns: 1fr;
+          }
+          .break-980 .main-col {
+            grid-column: auto;
+            order: 1;
+          }
+          .break-980 .aside-col {
+            order: 2;
+          }
+
+          .page-header {
+            flex-direction: column;
+            align-items: flex-start;
+            gap: 0.75rem;
+          }
+
+          .header-actions {
+            width: 100%;
+            display: flex;
+            gap: 0.5rem;
+            flex-wrap: wrap;
+          }
+
+          /* make action items NOT stretch on small screens and instead wrap */
+          .header-actions > * {
+            flex: 0 1 auto;
+            min-width: 0;
+          }
+
+          /* make the progress block not push actions off-screen */
+          .page-header .text-right {
+            width: auto;
+            margin-right: 0;
+          }
+
+          /* ensure pre blocks don't overflow horizontally on small screens */
+          pre {
+            white-space: pre-wrap;
+            word-break: break-word;
+          }
+        }
+
+        /* small niceties */
+        ol.space-y-4 > li {
+          min-width: 0; /* help nested flex items avoid overflow */
+        }
+      `}</style>
     </div>
   );
 }
