@@ -391,13 +391,19 @@ export async function POST(request: Request) {
       ],
     };
 
-    const created = await Project.create(projectData);
+    const created = await Project.create(projectData as any);
 
-    const createdObj =
-      typeof created.toObject === "function" ? created.toObject() : created;
-    createdObj.id = createdObj._id?.toString?.() ?? createdObj.id ?? null;
-    delete createdObj._id;
-    delete createdObj.__v;
+    const raw =
+      typeof created.toObject === "function"
+        ? created.toObject()
+        : (created as any);
+
+    const { _id, __v, ...rest } = raw;
+
+    const createdObj = {
+      ...rest,
+      id: _id?.toString?.() ?? null,
+    };
 
     return NextResponse.json(
       { ok: true, message: "Project saved successfully.", project: createdObj },
