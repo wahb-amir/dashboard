@@ -7,15 +7,27 @@ import Project from "@/app/models/Projects";
 import mongoose from "mongoose";
 import { v4 as uuidv4 } from "uuid";
 
+/**
+ * StepStatus must match the exact union used in your Mongoose model.
+ * Update this list if your schema uses different literals.
+ */
+type StepStatus =
+  | "completed"
+  | "Completed"
+  | "pending"
+  | "done"
+  | "in-progress";
+
 type StepPayload = {
   id?: string;
   step?: string;
   weekday?: string;
   date?: string;
   data?: Record<string, unknown>;
-  status?: string;
+  status?: StepStatus;
   notes?: string;
   createdBy?: string;
+  updatedBy?: string;
   createdAt?: string | Date;
 };
 
@@ -28,6 +40,7 @@ type ProjectPayload = {
   company?: string | null;
   email?: string | null;
   contactName?: string | null;
+  status?: StepStatus;
   steps?: StepPayload[];
 };
 
@@ -52,15 +65,31 @@ function parseCookie(header: string | null, name: string): string | null {
 
 async function resolveToken(authToken: string | null) {
   if (!authToken) return null;
-  // verifyToken might be sync or async depending on your implementation
   const maybe = await Promise.resolve(verifyToken(authToken, "AUTH"));
-  // caller expects { decoded?: DecodedToken|null } or similar
   return (maybe as any) ?? null;
+}
+
+const ALLOWED_STEP_STATUSES: StepStatus[] = [
+  "completed",
+  "Completed",
+  "pending",
+  "done",
+  "in-progress",
+];
+
+function normalizeStepStatus(
+  input: unknown,
+  fallback: StepStatus = "pending"
+): StepStatus {
+  if (typeof input !== "string") return fallback;
+  const cand = input.trim();
+  return ALLOWED_STEP_STATUSES.includes(cand as StepStatus)
+    ? (cand as StepStatus)
+    : fallback;
 }
 
 export async function GET(request: Request) {
   try {
-    // Read cookies from header for reliability (client fetch sends Cookie header when credentials: 'include')
     const cookieHeader = request.headers.get("cookie");
     const authToken =
       parseCookie(cookieHeader, "authToken") ??
@@ -77,7 +106,6 @@ export async function GET(request: Request) {
       | { decoded?: DecodedToken | null }
       | null
       | undefined;
-
     const decoded = tokenRes?.decoded ?? null;
 
     if (!decoded) {
@@ -139,7 +167,6 @@ export async function GET(request: Request) {
     const rawOffset = url.searchParams.get("offset");
     const q = url.searchParams.get("q")?.trim() || null;
 
-    // defaults and caps
     const DEFAULT_LIMIT = 5;
     const MAX_LIMIT = 100;
     let limit = DEFAULT_LIMIT;
@@ -147,27 +174,21 @@ export async function GET(request: Request) {
 
     if (rawLimit !== null) {
       const parsed = parseInt(rawLimit, 10);
-      if (!isNaN(parsed) && parsed > 0) {
-        limit = Math.min(MAX_LIMIT, parsed);
-      }
+      if (!isNaN(parsed) && parsed > 0) limit = Math.min(MAX_LIMIT, parsed);
     }
 
     if (rawOffset !== null) {
       const parsed = parseInt(rawOffset, 10);
-      if (!isNaN(parsed) && parsed >= 0) {
-        offset = parsed;
-      }
+      if (!isNaN(parsed) && parsed >= 0) offset = parsed;
     }
 
-    // build filter (only projects owned by the user)
     const filter: any = { userId: (decoded as any).uid };
 
     if (q) {
-      // search multiple fields (case-insensitive)
       const regex = { $regex: q, $options: "i" };
       filter.$or = [
-        { title: regex }, // in case you use `title`
-        { name: regex }, // in case projects use `name`
+        { title: regex },
+        { name: regex },
         { description: regex },
         { contactName: regex },
         { email: regex },
@@ -175,10 +196,9 @@ export async function GET(request: Request) {
       ];
     }
 
-    // fetch paginated results and total count in parallel; sort by createdAt desc (newest first)
     const [rows, total] = await Promise.all([
       Project.find(filter)
-        .sort({ createdAt: -1, _id: -1 }) // fallback to _id if createdAt missing
+        .sort({ createdAt: -1, _id: -1 })
         .skip(offset)
         .limit(limit)
         .lean()
@@ -212,7 +232,6 @@ export async function GET(request: Request) {
 
 export async function POST(request: Request) {
   try {
-    // --- Cookies (avoid cookies.get overload/typing issues) ---
     const cookieHeader = request.headers.get("cookie");
     const authToken =
       parseCookie(cookieHeader, "authToken") ??
@@ -225,12 +244,10 @@ export async function POST(request: Request) {
       );
     }
 
-    // --- Verify token (adjust depending on whether verifyToken is async) ---
     const tokenRes = (await resolveToken(authToken)) as
       | { decoded?: DecodedToken | null }
       | null
       | undefined;
-
     const decoded: DecodedToken | null = tokenRes?.decoded ?? null;
 
     if (!decoded) {
@@ -240,7 +257,6 @@ export async function POST(request: Request) {
       );
     }
 
-    // --- Parse body safely ---
     const bodyRaw = await request.json().catch(() => null);
     if (!bodyRaw) {
       return NextResponse.json(
@@ -250,7 +266,6 @@ export async function POST(request: Request) {
     }
     const payload = bodyRaw as Partial<ProjectPayload>;
 
-    // --- Normalize incoming fields and use decoded token as fallback ---
     const title =
       typeof payload.name === "string" ? payload.name.trim() : undefined;
     const description =
@@ -304,7 +319,7 @@ export async function POST(request: Request) {
         month: "long",
         day: "numeric",
       }),
-      status: "Completed",
+      status: normalizeStepStatus("Completed", "Completed"),
       notes: `Project created by ${title}`,
       createdBy: userId,
       createdAt: now,
@@ -318,18 +333,22 @@ export async function POST(request: Request) {
             weekday: typeof s?.weekday === "string" ? s.weekday : undefined,
             date: typeof s?.date === "string" ? s.date : undefined,
             data: s?.data && typeof s.data === "object" ? s.data : {},
-            status: typeof s?.status === "string" ? s.status : "pending",
+            status: normalizeStepStatus(s?.status, "pending"),
             notes: typeof s?.notes === "string" ? s.notes : "",
             createdBy: typeof s?.createdBy === "string" ? s.createdBy : userId,
             createdAt: s?.createdAt ? new Date(s.createdAt) : now,
           })) as StepPayload[])
         : [initialStep];
 
-    // sample developers — replace or remove as needed
     const developers = [
       { name: "Wahb", portfolio: "https://wahb.space" },
       { name: "Shahnawaz", portfolio: "https://shahnawaz.buttnetworks.com" },
     ];
+
+    const topStatus = normalizeStepStatus(
+      (payload as any).status ?? "pending",
+      "pending"
+    );
 
     const projectData = {
       userId,
@@ -342,7 +361,7 @@ export async function POST(request: Request) {
       contactName: contactName ?? null,
       steps: sanitizedSteps,
       currentFocus: "New quote request received.",
-      status: "pending",
+      status: topStatus,
       developers: developers.map((d) => ({
         name: d.name,
         portfolio: d.portfolio ?? null,
@@ -363,7 +382,7 @@ export async function POST(request: Request) {
               name: d.name,
               portfolio: d.portfolio ?? null,
             })),
-            status: "pending",
+            status: topStatus,
             currentFocus: "New quote request received.",
           },
           createdAt: now,
