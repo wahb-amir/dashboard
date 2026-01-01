@@ -139,38 +139,41 @@ export default function ProjectCard({
   if (isDashboardHome) {
     return (
       <article
-        className={`bg-white rounded-lg shadow-sm border p-4 flex items-center justify-between gap-4 ${className}`}
+        className={`bg-white rounded-lg shadow-sm border p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 min-h-[80px] ${className}`}
       >
-        <div className="min-w-0">
+        <div className="min-w-0 w-full">
           <h3 className="text-lg font-semibold text-gray-900 truncate">
             {title}
           </h3>
-          <div className="mt-1 flex items-center gap-3 text-sm text-gray-600">
+          <div className="mt-2 flex flex-col sm:flex-row sm:items-center gap-2 text-sm text-gray-600">
             <div className="inline-flex items-center gap-2">
               <Calendar size={14} />{" "}
               <span className="text-xs">{dueDateStr}</span>
             </div>
             <div className="inline-flex items-center gap-2">
-              <Users size={14} /> <span className="text-xs">{client}</span>
+              <Users size={14} />{" "}
+              <span className="text-xs truncate max-w-[140px]">{client}</span>
             </div>
-          </div>
 
-          <div className="mt-3 w-40 h-2 bg-gray-100 rounded overflow-hidden">
-            <div
-              className="h-2 rounded bg-gradient-to-r from-blue-400 to-indigo-600"
-              style={{ width: `${Math.max(0, Math.min(100, progress))}%` }}
-            />
+            <div className="mt-2 sm:mt-0 w-full sm:w-auto">
+              <div className="w-full h-2 bg-gray-100 rounded overflow-hidden">
+                <div
+                  className="h-2 rounded bg-gradient-to-r from-blue-400 to-indigo-600"
+                  style={{ width: `${Math.max(0, Math.min(100, progress))}%` }}
+                />
+              </div>
+            </div>
           </div>
         </div>
 
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-3 mt-2 sm:mt-0">
           <div className="flex-shrink-0">
             <StatusBadge status={project.status} />
           </div>
 
           <button
             onClick={handleView}
-            className="inline-flex items-center gap-2 px-2 py-1 rounded-md text-sm font-medium text-blue-700 hover:bg-blue-50 transition"
+            className="inline-flex items-center gap-2 px-2 py-1 rounded-md text-sm font-medium text-blue-700 hover:bg-blue-50 transition w-full sm:w-auto justify-center"
             aria-label={`View ${title}`}
           >
             View <ChevronRight size={16} />
@@ -183,17 +186,19 @@ export default function ProjectCard({
   // --- Full / detailed card for all other places (includes /dashboard/projects/*) ---
   return (
     <article className={`bg-white rounded-lg shadow border p-5 ${className}`}>
-      <header className="flex items-start justify-between gap-4">
+      <header className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
         <div className="flex-1 min-w-0">
           <div className="flex items-center justify-between gap-4">
             <div className="min-w-0">
               <h3 className="text-lg font-semibold text-gray-900 truncate">
                 {title}
               </h3>
-              <div className="mt-1 flex items-center gap-3 text-sm text-gray-600">
+              <div className="mt-1 flex flex-col sm:flex-row sm:items-center gap-2 text-sm text-gray-600">
                 <span className="inline-flex items-center gap-1">
                   <User size={14} />{" "}
-                  <span className="truncate max-w-[180px]">{client}</span>
+                  <span className="truncate max-w-[140px] sm:max-w-[180px]">
+                    {client}
+                  </span>
                 </span>
                 <span className="inline-flex items-center gap-1">
                   <Calendar size={14} /> <span>{dueDateStr}</span>
@@ -211,7 +216,7 @@ export default function ProjectCard({
           </p>
 
           {/* progress bar + small meta */}
-          <div className="mt-4 grid grid-cols-2 gap-3 items-center">
+          <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-3 items-center">
             <div>
               <div className="flex items-center justify-between text-sm text-gray-700">
                 <div className="flex items-baseline gap-2">
@@ -233,9 +238,9 @@ export default function ProjectCard({
               </div>
             </div>
 
-            <div className="text-right">
+            <div className="text-left sm:text-right">
               <div className="text-xs text-gray-500">Developers</div>
-              <div className="mt-1 flex items-center justify-end gap-2">
+              <div className="mt-1 flex items-center justify-start sm:justify-end gap-2">
                 {(project.developers ?? []).slice(0, 3).map((d, i) => (
                   <div
                     key={d.name + i}
@@ -261,7 +266,7 @@ export default function ProjectCard({
       </header>
 
       {/* steps preview */}
-      <div className="mt-5 border-t pt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
+      <div className="mt-5 border-t pt-4 grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div>
           <div className="text-sm font-medium text-gray-800 mb-2">
             Recent Activity
@@ -331,17 +336,17 @@ export default function ProjectCard({
         </div>
       </div>
 
-      <footer className="mt-4 flex items-center justify-end gap-3">
+      <footer className="mt-4 flex flex-col sm:flex-row items-stretch sm:items-center justify-end gap-3">
         <button
           onClick={() => setExpanded((s) => !s)}
-          className="inline-flex items-center gap-2 px-3 py-1.5 rounded-md text-sm font-medium text-gray-700 hover:bg-gray-50 transition"
+          className="inline-flex items-center gap-2 px-3 py-1.5 rounded-md text-sm font-medium text-gray-700 hover:bg-gray-50 transition w-full sm:w-auto justify-center"
         >
           {expanded ? "Collapse" : "Expand"}
         </button>
 
         <button
           onClick={handleView}
-          className="inline-flex items-center gap-2 px-3 py-1.5 rounded-md text-sm font-semibold text-blue-700 bg-blue-50 hover:bg-blue-100 transition"
+          className="inline-flex items-center gap-2 px-3 py-1.5 rounded-md text-sm font-semibold text-blue-700 bg-blue-50 hover:bg-blue-100 transition w-full sm:w-auto justify-center"
         >
           View Details <ChevronRight size={14} />
         </button>
