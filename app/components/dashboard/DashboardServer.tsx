@@ -8,7 +8,7 @@ interface Props {
   needsRefresh: boolean;
 }
 
-const PAGE_SIZE = 5;
+const PAGE_SIZE = 6;
 
 export default async function DashboardServer({ user, needsRefresh }: Props) {
   let initialProjects: ProjectFromDB[] = [];

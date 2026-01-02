@@ -1,6 +1,12 @@
 "use client";
 
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import toast from "react-hot-toast";
 import { useRouter } from "next/navigation";
 import type { AuthTokenPayload } from "@/app/utils/token";
@@ -15,19 +21,15 @@ import ProjectCard, {
 } from "@/app/components/Projects/ProjectCard";
 
 interface Props {
-  // server-provided initial data
   initialUser?: AuthTokenPayload | null;
   initialProjects?: ProjectFromDB[];
   initialPage?: number;
   initialHasMore?: boolean;
   initialQuery?: string;
-
-  // client-only flags
-  user?: AuthTokenPayload | null; // kept for backward compatibility
+  user?: AuthTokenPayload | null;
   needsRefresh?: boolean;
 }
 
-// keep PAGE_SIZE outside the component so it doesn't cause re-creation
 const PAGE_SIZE = 5;
 
 export default function DashboardPageClient({
@@ -41,11 +43,9 @@ export default function DashboardPageClient({
 }: Props) {
   const router = useRouter();
 
-  // prefer server-provided user if available, otherwise fall back to prop user
   const [currentUser, setCurrentUser] = useState<AuthTokenPayload | null>(
     initialUser ?? user
   );
-
   const [loading, setLoading] = useState<boolean>(false);
   const [retryCount, setRetryCount] = useState(0);
   const [failed, setFailed] = useState(false);
@@ -54,56 +54,72 @@ export default function DashboardPageClient({
   const [open, setOpen] = useState(false);
   const [quote, setQuote] = useState<QuotePayload | null>(null);
 
-  // master list of loaded projects (pages appended here)
+  // master list & displayed list
   const [projects, setProjects] = useState<ProjectFromDB[]>(initialProjects);
-  // what we show in the UI (either filtered local projects or remote search results)
   const [displayed, setDisplayed] = useState<ProjectFromDB[]>(initialProjects);
 
   const [projectsLoading, setProjectsLoading] = useState<boolean>(false);
   const [projectsError, setProjectsError] = useState<string | null>(null);
-  const [page, setPage] = useState<number>(initialPage); // 0-based
+  const [page, setPage] = useState<number>(initialPage);
   const [hasMore, setHasMore] = useState<boolean>(initialHasMore);
 
-  // query state (start from server provided query if any)
+  // initial loading state: if server gave projects, skip initial loading skeleton
+  const [initialLoadComplete, setInitialLoadComplete] = useState<boolean>(
+    Boolean(initialProjects && initialProjects.length > 0)
+  );
+
   const [query, setQuery] = useState(initialQuery);
 
-  // refs for aborting and debounce
   const controllerRef = useRef<AbortController | null>(null);
   const debounceRef = useRef<number | null>(null);
-
-  // search cache for remote queries
   const remoteCache = useRef<Record<string, ProjectFromDB[]>>({});
-
-  // store latest query in a ref so loadProjects can use it without being re-created
   const queryRef = useRef(query);
   useEffect(() => {
     queryRef.current = query;
   }, [query]);
 
-  // Build a lightweight title index for fast local search. Recompute only when projects change.
   const titleIndex = useMemo(() => {
-    // list of { id, titleLower } for O(n) scan with minimal allocations
     return projects.map((p) => ({
       id: p._id ?? (p as any).id ?? "",
       titleLower: (p.title ?? "").toLowerCase(),
     }));
   }, [projects]);
 
+  // onCreate: try to use optimistic created project if provided by modal; else re-fetch page 0.
   const onCreate = async (payload: any) => {
-    await new Promise((res) => setTimeout(res, 700));
-    console.log("Create:", payload);
-    toast.success("Project created!");
-    // refresh first page
+    // payload may contain the created project (depends on your CreateProjectModal implementation)
+    const created: ProjectFromDB | null =
+      payload?.project ??
+      payload?.createdProject ??
+      (payload?.id ? (payload as any) : null);
+
+    if (created && created._id) {
+      // optimistic prepend so UI immediately shows the new project
+      setProjects((prev) => [created, ...prev]);
+      setDisplayed((prev) => [created, ...prev]);
+      toast.success("Project created!");
+      return;
+    }
+
+    // otherwise fallback: clear active query so user sees master list and re-fetch first page
+    // NOTE: clearing search is intentional so new project shows up immediately in UI.
+    queryRef.current = "";
+    setQuery("");
     setPage(0);
-    // clear master list and re-fetch first page
     setProjects([]);
-    await loadProjects(0, false);
+    setDisplayed([]);
+    try {
+      await loadProjects(0, false);
+      toast.success("Project created!");
+    } catch (e) {
+      // loadProjects handles errors and toasts already
+    }
   };
+
   const onRequested = async (q: QuotePayload) => {
     setQuote(q);
   };
 
-  // optional: keep server/session fresh if needsRefresh toggles
   useEffect(() => {
     if (!needsRefresh) return;
     if (loading) return;
@@ -192,10 +208,13 @@ export default function DashboardPageClient({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [needsRefresh, retryCount]);
 
-  // loadProjects is stable via useCallback and reads query via queryRef
+  // loadProjects now returns the loaded array so callers can use it
   const loadProjects = useCallback(
-    async (loadPage = 0, append = false, q?: string) => {
-      // abort any in-flight request that was initiated by loadProjects
+    async (
+      loadPage = 0,
+      append = false,
+      q?: string
+    ): Promise<ProjectFromDB[]> => {
       if (controllerRef.current) {
         try {
           controllerRef.current.abort();
@@ -208,6 +227,8 @@ export default function DashboardPageClient({
 
       setProjectsLoading(true);
       setProjectsError(null);
+
+      let loaded: ProjectFromDB[] = [];
 
       try {
         const offset = loadPage * PAGE_SIZE;
@@ -222,7 +243,7 @@ export default function DashboardPageClient({
           signal: controller.signal,
         });
 
-        if (controller.signal.aborted) return;
+        if (controller.signal.aborted) return [];
 
         if (!res.ok) {
           let errMsg = `Failed to load projects (status ${res.status})`;
@@ -232,30 +253,25 @@ export default function DashboardPageClient({
           } catch {}
           setProjectsError(errMsg);
           toast.error(errMsg);
-          return;
+          return [];
         }
 
         const data = await res.json().catch(() => null);
         if (!data) {
           setProjectsError("Invalid project data returned from server.");
           toast.error("Invalid project data returned from server.");
-          return;
+          return [];
         }
 
-        // Accept either an array or { projects: [...], total?: number }
-        const loaded: ProjectFromDB[] = Array.isArray(data)
-          ? data
-          : data.projects ?? [];
+        loaded = Array.isArray(data) ? data : data.projects ?? [];
 
-        // if append, concat; otherwise replace
         setProjects((prev) => (append ? [...prev, ...loaded] : loaded));
 
-        // update displayed only when there's no active query (i.e. show local data)
         if (!queryRef.current) {
+          // only update displayed automatically when there's no active query
           setDisplayed((prev) => (append ? [...prev, ...loaded] : loaded));
         }
 
-        // determine hasMore:
         if (!Array.isArray(data) && typeof data.total === "number") {
           const total = data.total;
           const fetchedSoFar = (loadPage + 1) * PAGE_SIZE;
@@ -265,52 +281,53 @@ export default function DashboardPageClient({
             loaded.length === PAGE_SIZE || (append && loaded.length > 0)
           );
         }
+
+        return loaded;
       } catch (err: any) {
-        if (err?.name === "AbortError") return;
+        if (err?.name === "AbortError") return [];
         setProjectsError("Network error while loading projects.");
         toast.error("Network error while loading projects.");
+        return [];
       } finally {
-        // only clear loading if this controller is still the current one
         if (controllerRef.current === controller) controllerRef.current = null;
         setProjectsLoading(false);
+        // Mark initial load as done after first attempt for loadPage 0
+        if (loadPage === 0 && !initialLoadComplete) {
+          setInitialLoadComplete(true);
+        }
       }
     },
-    []
+    [initialLoadComplete]
   );
 
   // initial load: only when needsRefresh toggles true OR when we have no initial projects
   useEffect(() => {
     if (initialProjects && initialProjects.length > 0 && !needsRefresh) {
-      // we already have server-provided projects — no fetch on mount
       return;
     }
 
     setPage(0);
-    // pass current query explicitly (likely empty on mount)
+    // explicit call for page 0
     loadProjects(0, false, queryRef.current);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [needsRefresh]);
 
-  // FAST LOCAL TITLE SEARCH: only search titles in-memory using the precomputed titleIndex.
-  // This keeps the local search extremely fast for large lists and avoids allocations.
   const performLocalFirstSearch = useCallback(
     async (q: string) => {
       const term = (q || "").trim().toLowerCase();
 
       if (!term) {
-        // empty query -> show master list
         setDisplayed(projects);
         return;
       }
 
-      // 1) Fast prefix matches on title (very cheap)
       const prefixMatches: ProjectFromDB[] = [];
       for (let i = 0; i < titleIndex.length; i++) {
         const ti = titleIndex[i];
         if (ti.titleLower.startsWith(term)) {
           const proj = projects[i];
           if (proj) prefixMatches.push(proj);
-          if (prefixMatches.length >= 50) break; // limit results
+          if (prefixMatches.length >= 50) break;
         }
       }
 
@@ -319,7 +336,6 @@ export default function DashboardPageClient({
         return;
       }
 
-      // 2) If no prefix hits, do contains-in-title (still fast)
       const containsMatches: ProjectFromDB[] = [];
       for (let i = 0; i < titleIndex.length; i++) {
         const ti = titleIndex[i];
@@ -335,24 +351,19 @@ export default function DashboardPageClient({
         return;
       }
 
-      // 3) No local title matches. Only query backend if there are more pages to search.
       if (!hasMore) {
-        // no more pages and no local match -> show empty
         setDisplayed([]);
         return;
       }
 
-      // check cache
       if (remoteCache.current[term]) {
         setDisplayed(remoteCache.current[term]);
         return;
       }
 
-      // otherwise call backend search (page 0)
       setProjectsLoading(true);
       try {
         const controller = new AbortController();
-        // abort previous remote search if any
         if (controllerRef.current) {
           try {
             controllerRef.current.abort();
@@ -389,11 +400,9 @@ export default function DashboardPageClient({
           ? data
           : data?.projects ?? [];
 
-        // cache and display
         remoteCache.current[term] = loaded;
         setDisplayed(loaded);
 
-        // if the remote search returned PAGE_SIZE results, there might still be more — keep hasMore true
         if (!Array.isArray(data) && typeof data.total === "number") {
           setHasMore(data.total > PAGE_SIZE);
         } else {
@@ -416,7 +425,6 @@ export default function DashboardPageClient({
     [titleIndex, projects, hasMore]
   );
 
-  // when query changes, debounce and run local-first search
   useEffect(() => {
     if (debounceRef.current) {
       window.clearTimeout(debounceRef.current);
@@ -435,7 +443,6 @@ export default function DashboardPageClient({
     };
   }, [query, performLocalFirstSearch]);
 
-  // cleanup on unmount
   useEffect(() => {
     return () => {
       if (controllerRef.current) {
@@ -451,34 +458,31 @@ export default function DashboardPageClient({
     };
   }, []);
 
-  // load more handler — loads next page and appends to master list
   const handleLoadMore = async () => {
     const nextPage = page + 1;
     setPage(nextPage);
-    // fetch page and append to master list
-    await loadProjects(nextPage, true);
-    // when there's no active query, also append to displayed
-    if (!queryRef.current) {
-      setDisplayed((prev) => {
-        // append the newly loaded items from projects (safe because loadProjects appended to projects state)
-        return [...projects, ...projects.slice(prev.length)];
-      });
+    const loaded = await loadProjects(nextPage, true);
+    if (!queryRef.current && loaded && loaded.length > 0) {
+      setDisplayed((prev) => [...prev, ...loaded]);
     }
   };
 
-  // prevent unnecessary renders: update queryRef on input quickly but set state once
   function handleQueryChange(e: React.ChangeEvent<HTMLInputElement>) {
     const v = e.target.value;
-    // update both state and ref — state drives UI, ref used by fetch
     setQuery(v);
     queryRef.current = v;
   }
 
+  // Account load error UI
   if (!currentUser && failed) {
     return (
       <div className="p-6">
-        <div className="text-lg font-semibold text-black">Unable to load account.</div>
-        <div className="mt-2 text-sm text-gray-600">Something went wrong while fetching your session. You can retry.</div>
+        <div className="text-lg font-semibold text-black">
+          Unable to load account.
+        </div>
+        <div className="mt-2 text-sm text-gray-600">
+          Something went wrong while fetching your session. You can retry.
+        </div>
         <div className="mt-4">
           <button
             onClick={() => {
@@ -495,6 +499,7 @@ export default function DashboardPageClient({
     );
   }
 
+  // while initial load is in progress show a polished skeleton page
   if (!currentUser && !failed) {
     return (
       <div className="max-w-7xl mx-auto p-6">
@@ -511,21 +516,26 @@ export default function DashboardPageClient({
     );
   }
 
+  // MAIN RENDER
   return (
     <div className="h-screen flex flex-col bg-gray-50">
-      {/* header */}
-      <header className="px-4 py-4 border-b bg-white">
+      <header className="px-4 py-3 border-b bg-white">
         <div className="max-w-7xl mx-auto">
           <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
             <div>
-              <h1 className="text-2xl font-bold text-black">Projects</h1>
-              <p className="text-sm text-gray-700">Overview of ongoing work and quick actions.</p>
+              {/* moved a bit higher with negative margin to satisfy "heading a bit higher" */}
+              <h1 className="text-2xl font-bold text-black -mt-1">Projects</h1>
+              <p className="text-sm text-gray-700">
+                Overview of ongoing work and quick actions.
+              </p>
             </div>
 
-            {/* search + create (stacked on mobile) */}
             <div className="w-full sm:w-auto flex items-center gap-3">
               <div className="relative flex-1 w-full">
-                <Search size={16} className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-500" />
+                <Search
+                  size={16}
+                  className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-500"
+                />
                 <input
                   type="search"
                   aria-label="Search projects"
@@ -538,15 +548,26 @@ export default function DashboardPageClient({
                         window.clearTimeout(debounceRef.current);
                         debounceRef.current = null;
                       }
-                      // perform immediate search
                       performLocalFirstSearch(queryRef.current);
                     }
                   }}
-                  className="pl-10 pr-3 py-2 rounded-md border bg-white shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-300 text-gray-900 placeholder:text-gray-500 w-full"
+                  className="pl-10 pr-10 py-2 rounded-md border bg-white shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-300 text-gray-900 placeholder:text-gray-500 w-full"
                 />
+                {projectsLoading && (
+                  <div className="absolute right-3 top-1/2 -translate-y-1/2">
+                    <Activity
+                      size={16}
+                      className="animate-spin text-gray-500"
+                    />
+                  </div>
+                )}
               </div>
 
-              <CreateProjectModal open={open} onClose={() => setOpen(false)} onCreate={onCreate} />
+              <CreateProjectModal
+                open={open}
+                onClose={() => setOpen(false)}
+                onCreate={onCreate}
+              />
             </div>
           </div>
         </div>
@@ -555,19 +576,32 @@ export default function DashboardPageClient({
       <main className="flex-1 overflow-auto">
         <div className="max-w-7xl mx-auto h-full px-4 py-6">
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            {/* Aside (quick actions) */}
             <aside className="order-first lg:order-last space-y-4 h-auto">
               <div className="bg-white rounded-lg shadow-sm border p-4">
-                <h3 className="text-sm font-semibold mb-2 text-black">Quick Actions</h3>
-                <p className="text-xs text-gray-600 mb-3">Common tasks at your fingertips.</p>
+                <h3 className="text-sm font-semibold mb-2 text-black">
+                  Quick Actions
+                </h3>
+                <p className="text-xs text-gray-600 mb-3">
+                  Common tasks at your fingertips.
+                </p>
 
                 <div className="flex flex-col gap-2">
-                  <button onClick={() => setModalOpen(true)} className="w-full inline-flex items-center justify-between gap-2 px-3 py-2 rounded-md border hover:bg-gray-100 bg-transparent transition-all ">
+                  <button
+                    onClick={() => setModalOpen(true)}
+                    className="w-full inline-flex items-center justify-between gap-2 px-3 py-2 rounded-md border hover:bg-gray-100 transition-all bg-transparent"
+                  >
                     <span className="text-gray-900">Request a New Quote</span>
                     <ChevronRight size={16} />
                   </button>
-                  <GetQuoteModal open={modalOpen} onClose={() => setModalOpen(false)} onRequested={onRequested} />
-                  <button onClick={() => setOpen(true)} className="w-full inline-flex items-center justify-between gap-2 px-3 py-2 rounded-md bg-blue-600 text-white transition">
+                  <GetQuoteModal
+                    open={modalOpen}
+                    onClose={() => setModalOpen(false)}
+                    onRequested={onRequested}
+                  />
+                  <button
+                    onClick={() => setOpen(true)}
+                    className="w-full inline-flex items-center justify-between gap-2 px-3 py-2 rounded-md bg-blue-600 text-white transition"
+                  >
                     <span>Create Project</span>
                     <Plus size={16} />
                   </button>
@@ -575,39 +609,121 @@ export default function DashboardPageClient({
               </div>
 
               <div className="bg-white rounded-lg shadow-sm border p-4">
-                <LiveChat userEmail={currentUser?.email ?? null} userName={currentUser?.name ?? currentUser?.email ?? "You"} />
+                <LiveChat
+                  userEmail={currentUser?.email ?? null}
+                  userName={currentUser?.name ?? currentUser?.email ?? "You"}
+                />
               </div>
             </aside>
+
             <section className="lg:col-span-2 flex flex-col gap-4">
-              {projectsLoading ? (
+              {/* initial full-page skeleton before first load completes */}
+              {!initialLoadComplete ? (
                 <div className="space-y-4">
-                  <div className="bg-white rounded-lg shadow-sm border p-5 animate-pulse max-w-full">...</div>
-                  <div className="bg-white rounded-lg shadow-sm border p-5 animate-pulse max-w-full">...</div>
-                  <div className="bg-white rounded-lg shadow-sm border p-5 animate-pulse max-w-full">...</div>
+                  <div className="bg-white rounded-lg shadow-sm border p-5 animate-pulse max-w-full h-28" />
+                  <div className="bg-white rounded-lg shadow-sm border p-5 animate-pulse max-w-full h-28" />
+                  <div className="bg-white rounded-lg shadow-sm border p-5 animate-pulse max-w-full h-28" />
+                </div>
+              ) : projectsLoading && displayed.length === 0 ? (
+                // while fetching after initial load show card skeletons (but not the empty state)
+                <div className="space-y-4">
+                  <div className="bg-white rounded-lg shadow-sm border p-5 animate-pulse max-w-full h-28" />
+                  <div className="bg-white rounded-lg shadow-sm border p-5 animate-pulse max-w-full h-28" />
+                </div>
+              ) : projectsError ? (
+                <div className="bg-white p-6 rounded border text-black">
+                  <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+                    <div>
+                      <div className="font-semibold">
+                        Unable to load projects
+                      </div>
+                      <div className="text-sm text-gray-600 mt-1">
+                        {projectsError}
+                      </div>
+                    </div>
+                    <div>
+                      <button
+                        onClick={() => {
+                          setProjectsError(null);
+                          loadProjects(0, false);
+                        }}
+                        className="inline-flex items-center gap-2 px-3 py-2 rounded-md bg-blue-600 text-white"
+                      >
+                        Retry
+                        <Activity size={16} />
+                      </button>
+                    </div>
+                  </div>
                 </div>
               ) : displayed.length === 0 ? (
-                <div className="bg-white p-4 rounded border text-black">{projectsError ? projectsError : "No projects found."}</div>
+                // only show empty state after initial load and no error
+                <div className="bg-white p-8 rounded border text-black flex flex-col items-center text-center gap-4">
+                  <div className="text-lg font-semibold">No projects found</div>
+                  <div className="text-sm text-gray-600">
+                    You don't have any projects yet — create your first project
+                    to get started.
+                  </div>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => setOpen(true)}
+                      className="px-4 py-2 rounded-md bg-blue-600 text-white"
+                    >
+                      Create Project
+                    </button>
+                    <button
+                      onClick={() => {
+                        setQuery("");
+                        queryRef.current = "";
+                        loadProjects(0, false);
+                      }}
+                      className="px-4 py-2 rounded-md border"
+                    >
+                      Refresh
+                    </button>
+                  </div>
+                </div>
               ) : (
                 <>
                   <div className="space-y-4">
                     {displayed.map((p) => (
-                      <div key={p._id ?? (p as any).id} className="project-item">
-                        <ProjectCard project={p} currentUser={currentUser} onView={(id) => router.push(`/dashboard/projects/${id}`)} />
+                      <div
+                        key={p._id ?? (p as any).id}
+                        className="project-item"
+                      >
+                        <ProjectCard
+                          project={p}
+                          currentUser={currentUser}
+                          onView={(id) =>
+                            router.push(`/dashboard/projects/${id}`)
+                          }
+                        />
                       </div>
                     ))}
                   </div>
 
-                  {/* load more area — only show when not actively searching remotely */}
                   {!queryRef.current && (
                     <div className="pt-4">
                       {hasMore ? (
                         <div className="flex justify-center">
-                          <button onClick={handleLoadMore} disabled={projectsLoading} className="px-4 py-2 rounded-md border bg-white hover:bg-gray-50 text-sm">
-                            {projectsLoading ? "Loading..." : `See next ${PAGE_SIZE} projects`}
+                          <button
+                            onClick={handleLoadMore}
+                            disabled={projectsLoading}
+                            className="px-4 py-2 rounded-md border bg-white hover:bg-gray-50 text-sm inline-flex items-center gap-2 text-black"
+                          >
+                            {projectsLoading ? (
+                              <>
+                                <Activity size={14} className="animate-spin" />{" "}
+                                Loading...
+                              </>
+                            ) : (
+                              `See more projects`
+                            )}
                           </button>
                         </div>
                       ) : (
-                        <div className="text-center text-xs text-gray-500">No more projects</div>
+                        <div className="text-center text-xs text-gray-500">
+                          No more projects
+                        </div>
                       )}
                     </div>
                   )}
