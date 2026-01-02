@@ -110,8 +110,10 @@ export const generateToken: GenerateTokenFn = (
         expiresIn = "1h";
     }
   }
+const signOptions: jwt.SignOptions = {
+  expiresIn: typeof expiresIn === "string" ? (expiresIn as unknown as string) : expiresIn,
+};
 
-  const signOptions: jwt.SignOptions = { expiresIn };
 
   return jwt.sign(payload as jwt.JwtPayload, secret, signOptions);
 };
