@@ -4,19 +4,34 @@ import { verifyToken } from "@/app/utils/token";
 import type { DecodedToken } from "@/app/utils/token";
 import connectToDatabase from "@/app/utils/mongodb";
 import Project from "@/app/models/Projects";
+import User from "@/app/models/User";
 import mongoose from "mongoose";
 import { v4 as uuidv4 } from "uuid";
 
 /**
- * StepStatus must match the exact union used in your Mongoose model.
- * Update this list if your schema uses different literals.
+ * Keep the allowed statuses and the StepStatus type at the top so everything
+ * that uses StepStatus has it available (no duplicate declarations).
  */
-type StepStatus =
-  | "completed"
-  | "Completed"
-  | "pending"
-  | "done"
-  | "in-progress";
+const ALLOWED_STEP_STATUSES = [
+  "completed",
+  "Completed",
+  "pending",
+  "done",
+  "in-progress",
+] as const;
+
+type StepStatus = (typeof ALLOWED_STEP_STATUSES)[number];
+
+function normalizeStepStatus(
+  input: unknown,
+  fallback: StepStatus = "pending"
+): StepStatus {
+  if (typeof input !== "string") return fallback;
+  const cand = input.trim();
+  return (ALLOWED_STEP_STATUSES as readonly string[]).includes(cand)
+    ? (cand as StepStatus)
+    : fallback;
+}
 
 type StepPayload = {
   id?: string;
@@ -44,15 +59,6 @@ type ProjectPayload = {
   steps?: StepPayload[];
 };
 
-function cookieOptions() {
-  return {
-    httpOnly: true,
-    secure: process.env.NODE_ENV === "production",
-    sameSite: "lax" as const,
-    maxAge: 60 * 60,
-  };
-}
-
 function parseCookie(header: string | null, name: string): string | null {
   if (!header) return null;
   const pairs = header.split(";").map((p) => p.trim());
@@ -63,65 +69,95 @@ function parseCookie(header: string | null, name: string): string | null {
   return null;
 }
 
-async function resolveToken(authToken: string | null) {
-  if (!authToken) return null;
-  const maybe = await Promise.resolve(verifyToken(authToken, "AUTH"));
-  return (maybe as any) ?? null;
-}
+export async function validateAndFetchUser(
+  refreshToken: string | null
+): Promise<{ uid: string; user: any } | { error: NextResponse } | null> {
+  // If there's an auth token attempt to use it first — but enforce version check
+  if (refreshToken) {
+    const authRes = verifyToken(refreshToken, "REFRESH");
+    if (!authRes?.decoded) {
+      return {
+        error: NextResponse.json(
+          { ok: false, message: "Invalid or expired auth token." },
+          { status: 401 }
+        ),
+      };
+    } else {
+      const dec = authRes.decoded as any;
+      if (!dec?.uid) {
+        return {
+          error: NextResponse.json(
+            { ok: false, message: "Invalid auth token: missing uid." },
+            { status: 401 }
+          ),
+        };
+      }
 
-const ALLOWED_STEP_STATUSES: StepStatus[] = [
-  "completed",
-  "Completed",
-  "pending",
-  "done",
-  "in-progress",
-];
+      // prefer tokenVersion, fallback to refreshVersion if you used that name
+      const tokenVersion =
+        typeof dec.version === "number" ? dec.version : undefined;
 
-function normalizeStepStatus(
-  input: unknown,
-  fallback: StepStatus = "pending"
-): StepStatus {
-  if (typeof input !== "string") return fallback;
-  const cand = input.trim();
-  return ALLOWED_STEP_STATUSES.includes(cand as StepStatus)
-    ? (cand as StepStatus)
-    : fallback;
+      const uid = dec.uid as string;
+
+      // Connect DB and fetch user once
+      await connectToDatabase();
+      const user = await User.findById(uid)
+        .select("name email company refreshVersion")
+        .lean()
+        .exec();
+
+      if (!user) {
+        return {
+          error: NextResponse.json(
+            { ok: false, message: "User not found." },
+            { status: 401 }
+          ),
+        };
+      }
+
+      // Immediate revocation check
+      if (user.refreshVersion !== tokenVersion) {
+        // Optionally, you could also clear cookies here by returning a Response that deletes cookies.
+        return {
+          error: NextResponse.json(
+            { ok: false, message: "Auth token revoked." },
+            { status: 401 }
+          ),
+        };
+      }
+
+      // Passed everything
+      return { uid, user };
+    }
+  }
+
+  return null;
 }
 
 export async function GET(request: Request) {
   try {
     const cookieHeader = request.headers.get("cookie");
-    const authToken =
-      parseCookie(cookieHeader, "authToken") ??
-      parseCookie(cookieHeader, "refreshToken");
 
-    if (!authToken) {
+    const authToken = parseCookie(cookieHeader, "authToken");
+    const refreshToken = parseCookie(cookieHeader, "refreshToken");
+
+    if (!authToken && !refreshToken) {
       return NextResponse.json(
         { ok: false, message: "No user token provided." },
         { status: 401 }
       );
     }
 
-    const tokenRes = (await resolveToken(authToken)) as
-      | { decoded?: DecodedToken | null }
-      | null
-      | undefined;
-    const decoded = tokenRes?.decoded ?? null;
-
-    if (!decoded) {
+    const authResult = await validateAndFetchUser(refreshToken);
+    if (!authResult) {
       return NextResponse.json(
-        { ok: false, message: "Invalid or expired user auth token." },
+        { ok: false, message: "No user token provided." },
         { status: 401 }
       );
     }
+    if ("error" in authResult) return authResult.error;
 
-    await connectToDatabase();
-
-    const ownerFromToken = {
-      name: (decoded as any).name ?? null,
-      email: (decoded as any).email ?? null,
-      company: (decoded as any).company ?? null,
-    };
+    const { uid, user } = authResult;
 
     const url = new URL(request.url);
     const projectId = url.searchParams.get("projectid")?.trim();
@@ -134,9 +170,10 @@ export async function GET(request: Request) {
         );
       }
 
+      // Fetch project AND user already fetched above -> we already have user.
       const project = await Project.findOne({
         _id: projectId,
-        userId: (decoded as any).uid,
+        userId: uid,
       })
         .lean()
         .exec();
@@ -150,10 +187,14 @@ export async function GET(request: Request) {
 
       const augmented = {
         ...project,
-        contactName: project.contactName ?? ownerFromToken.name,
-        email: project.email ?? ownerFromToken.email,
-        company: project.company ?? ownerFromToken.company,
-        owner: ownerFromToken,
+        contactName: project.contactName ?? user.name ?? null,
+        email: project.email ?? user.email ?? null,
+        company: project.company ?? user.company ?? null,
+        owner: {
+          name: user.name ?? null,
+          email: user.email ?? null,
+          company: user.company ?? null,
+        },
       };
 
       return NextResponse.json(
@@ -162,10 +203,11 @@ export async function GET(request: Request) {
       );
     }
 
-    // pagination & search params
-    const rawLimit = url.searchParams.get("limit");
-    const rawOffset = url.searchParams.get("offset");
-    const q = url.searchParams.get("q")?.trim() || null;
+    // Pagination & search params
+    const urlObj = new URL(request.url);
+    const rawLimit = urlObj.searchParams.get("limit");
+    const rawOffset = urlObj.searchParams.get("offset");
+    const q = urlObj.searchParams.get("q")?.trim() || null;
 
     const DEFAULT_LIMIT = 5;
     const MAX_LIMIT = 100;
@@ -182,7 +224,7 @@ export async function GET(request: Request) {
       if (!isNaN(parsed) && parsed >= 0) offset = parsed;
     }
 
-    const filter: any = { userId: (decoded as any).uid };
+    const filter: any = { userId: uid };
 
     if (q) {
       const regex = { $regex: q, $options: "i" };
@@ -196,6 +238,7 @@ export async function GET(request: Request) {
       ];
     }
 
+    // Fetch projects and count in parallel; user already fetched
     const [rows, total] = await Promise.all([
       Project.find(filter)
         .sort({ createdAt: -1, _id: -1 })
@@ -208,10 +251,14 @@ export async function GET(request: Request) {
 
     const augmentedProjects = (rows ?? []).map((project) => ({
       ...project,
-      contactName: project.contactName ?? ownerFromToken.name,
-      email: project.email ?? ownerFromToken.email,
-      company: project.company ?? ownerFromToken.company,
-      owner: ownerFromToken,
+      contactName: project.contactName ?? user.name ?? null,
+      email: project.email ?? user.email ?? null,
+      company: project.company ?? user.company ?? null,
+      owner: {
+        name: user.name ?? null,
+        email: user.email ?? null,
+        company: user.company ?? null,
+      },
     }));
 
     return NextResponse.json({
@@ -233,29 +280,26 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   try {
     const cookieHeader = request.headers.get("cookie");
-    const authToken =
-      parseCookie(cookieHeader, "authToken") ??
-      parseCookie(cookieHeader, "refreshToken");
+    const authToken = parseCookie(cookieHeader, "authToken");
+    const refreshToken = parseCookie(cookieHeader, "refreshToken");
 
-    if (!authToken) {
+    if (!authToken && !refreshToken) {
       return NextResponse.json(
         { ok: false, message: "No user token provided." },
         { status: 401 }
       );
     }
 
-    const tokenRes = (await resolveToken(authToken)) as
-      | { decoded?: DecodedToken | null }
-      | null
-      | undefined;
-    const decoded: DecodedToken | null = tokenRes?.decoded ?? null;
-
-    if (!decoded) {
+    const authResult = await validateAndFetchUser(refreshToken);
+    if (!authResult) {
       return NextResponse.json(
-        { ok: false, message: "Invalid or expired user auth token." },
+        { ok: false, message: "No user token provided." },
         { status: 401 }
       );
     }
+    if ("error" in authResult) return authResult.error;
+
+    const { uid, user } = authResult;
 
     const bodyRaw = await request.json().catch(() => null);
     if (!bodyRaw) {
@@ -280,21 +324,18 @@ export async function POST(request: Request) {
         : undefined;
 
     const company =
-      typeof payload.company === "string" ? payload.company : null;
+      typeof payload.company === "string"
+        ? payload.company
+        : user.company ?? null;
 
+    // Use user doc for email & contactName (decoded may not include them)
     const email =
-      typeof payload.email === "string"
-        ? payload.email
-        : typeof decoded.email === "string"
-        ? decoded.email
-        : null;
+      typeof payload.email === "string" ? payload.email : user.email ?? null;
 
     const contactName =
       typeof payload.contactName === "string"
         ? payload.contactName
-        : typeof decoded.name === "string"
-        ? decoded.name
-        : null;
+        : user.name ?? null;
 
     const stepsRaw = Array.isArray(payload.steps) ? payload.steps : [];
 
@@ -305,9 +346,8 @@ export async function POST(request: Request) {
       );
     }
 
-    await connectToDatabase();
-
-    const userId = decoded.uid;
+    // No need to connect here — validateAndFetchUser already connected and fetched user
+    const userId = uid;
     const now = new Date();
 
     const initialStep: StepPayload = {

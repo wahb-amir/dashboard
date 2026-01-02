@@ -20,5 +20,14 @@ export async function GET(request) {
         path: '/',
         maxAge: 0,
     });
+    response.cookies.set({
+        name: 'appToken',
+        value: '',
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'strict',
+        path: '/',
+        maxAge: 0,
+    });
     return response;
 }

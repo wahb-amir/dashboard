@@ -10,6 +10,7 @@ export interface IUser extends Document {
   role: string;
   createdAt: Date;
   updatedAt: Date;
+  refreshVersion: number;
   comparePassword?: (plain: string) => Promise<boolean>;
 }
 
@@ -36,12 +37,17 @@ const UserSchema = new Schema<IUser>(
     company: {
       type: String,
       required: false,
-      default: ""
+      default: "",
     },
     role: {
       type: String,
       default: "client",
       enum: ["client", "admin"],
+    },
+    refreshVersion: {
+      required: true,
+      type: Number,
+      default: 0,
     },
   },
   {
@@ -65,14 +71,13 @@ UserSchema.pre<IUser>("save", async function () {
     const hashed = await hashPassword(this.password);
     this.password = hashed;
   } catch (err) {
-    throw err; 
+    throw err;
   }
 });
 
 UserSchema.methods.comparePassword = async function (plain: string) {
   throw new Error("comparePassword not implemented - use your compare util");
 };
-
 
 // Prevent model recompilation in dev/hot-reload environments
 const User: Model<IUser> =

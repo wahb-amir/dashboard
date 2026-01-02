@@ -127,7 +127,6 @@ export async function POST(request: NextRequest): Promise<Response> {
     const userId = user._id.toString();
     const clientAuthToken = generateToken({
       uid: userId,
-      email: user.email,
       role: user.role || "client",
       name: user.name || "",
       company: user.company || "",
@@ -135,12 +134,12 @@ export async function POST(request: NextRequest): Promise<Response> {
     const refreshToken = generateToken(
       {
         uid: userId,
-        email: user.email,
         role: user.role || "client",
         name: user.name || "",
         company: user.company || "",
+        version:user.refreshVersion
       },
-      "AUTH",
+      "REFRESH",
       { expiresIn: "7d" }
     );
 

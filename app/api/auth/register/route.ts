@@ -183,6 +183,7 @@ export async function POST(request: NextRequest): Promise<Response> {
       password: password,
       role: "client",
       company: company ? company : false,
+      refreshVersion: 0,
     });
 
     const saved = await userDoc.save();
@@ -197,18 +198,21 @@ export async function POST(request: NextRequest): Promise<Response> {
     // tokens
     const authToken = generateToken({
       uid: newUserId,
-      email: emailLower,
       role: "client",
       name: name.trim(),
       company: company ? company : false,
     });
-    const refreshToken = generateToken({
-      uid: newUserId,
-      email: emailLower,
-      role: "client",
-      name: name.trim(),
-      company: company ? company : false,
-    });
+    const refreshToken = generateToken(
+      {
+        uid: newUserId,
+        role: "client",
+        name: name.trim(),
+        company: company ? company : false,
+        refreshVersion: saved.refreshVersion,
+      },
+      "REFRESH",
+      { expiresIn: "7d" }
+    );
 
     const res = Response.json(
       {

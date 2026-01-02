@@ -7,7 +7,7 @@ export async function GET(request) {
     if (appToken) {
         return Response.json({ message: "Token exists", token:appToken }, { status: 200 });
     }
-    const token = generateToken({}, "APP", { expiresIn: "1h" });
+    const token = generateToken({}, "APP", { expiresIn: "30m" });
     response.cookies.set({
         name: "appToken",
         value: token,
