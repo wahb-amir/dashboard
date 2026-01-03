@@ -87,22 +87,18 @@ export default function DashboardPageClient({
 
   // onCreate: try to use optimistic created project if provided by modal; else re-fetch page 0.
   const onCreate = async (payload: any) => {
-    // payload may contain the created project (depends on your CreateProjectModal implementation)
     const created: ProjectFromDB | null =
       payload?.project ??
       payload?.createdProject ??
       (payload?.id ? (payload as any) : null);
 
     if (created && created._id) {
-      // optimistic prepend so UI immediately shows the new project
       setProjects((prev) => [created, ...prev]);
       setDisplayed((prev) => [created, ...prev]);
       toast.success("Project created!");
       return;
     }
 
-    // otherwise fallback: clear active query so user sees master list and re-fetch first page
-    // NOTE: clearing search is intentional so new project shows up immediately in UI.
     queryRef.current = "";
     setQuery("");
     setPage(0);
@@ -111,9 +107,7 @@ export default function DashboardPageClient({
     try {
       await loadProjects(0, false);
       toast.success("Project created!");
-    } catch (e) {
-      // loadProjects handles errors and toasts already
-    }
+    } catch (e) {}
   };
 
   const onRequested = async (q: QuotePayload) => {
@@ -208,7 +202,6 @@ export default function DashboardPageClient({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [needsRefresh, retryCount]);
 
-  // loadProjects now returns the loaded array so callers can use it
   const loadProjects = useCallback(
     async (
       loadPage = 0,
@@ -268,7 +261,6 @@ export default function DashboardPageClient({
         setProjects((prev) => (append ? [...prev, ...loaded] : loaded));
 
         if (!queryRef.current) {
-          // only update displayed automatically when there's no active query
           setDisplayed((prev) => (append ? [...prev, ...loaded] : loaded));
         }
 
@@ -291,7 +283,6 @@ export default function DashboardPageClient({
       } finally {
         if (controllerRef.current === controller) controllerRef.current = null;
         setProjectsLoading(false);
-        // Mark initial load as done after first attempt for loadPage 0
         if (loadPage === 0 && !initialLoadComplete) {
           setInitialLoadComplete(true);
         }
@@ -300,14 +291,12 @@ export default function DashboardPageClient({
     [initialLoadComplete]
   );
 
-  // initial load: only when needsRefresh toggles true OR when we have no initial projects
   useEffect(() => {
     if (initialProjects && initialProjects.length > 0 && !needsRefresh) {
       return;
     }
 
     setPage(0);
-    // explicit call for page 0
     loadProjects(0, false, queryRef.current);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [needsRefresh]);
@@ -473,7 +462,6 @@ export default function DashboardPageClient({
     queryRef.current = v;
   }
 
-  // Account load error UI
   if (!currentUser && failed) {
     return (
       <div className="p-6">
@@ -499,7 +487,6 @@ export default function DashboardPageClient({
     );
   }
 
-  // while initial load is in progress show a polished skeleton page
   if (!currentUser && !failed) {
     return (
       <div className="max-w-7xl mx-auto p-6">
@@ -516,14 +503,13 @@ export default function DashboardPageClient({
     );
   }
 
-  // MAIN RENDER
   return (
-    <div className="h-screen flex flex-col bg-gray-50">
+    // <-- added overflow-hidden here so only `main` shows the scrollbar
+    <div className="h-screen flex flex-col bg-gray-50 overflow-hidden">
       <header className="px-4 py-3 border-b bg-white">
         <div className="max-w-7xl mx-auto">
-          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between pb-8    ">
             <div>
-              {/* moved a bit higher with negative margin to satisfy "heading a bit higher" */}
               <h1 className="text-2xl font-bold text-black -mt-1">Projects</h1>
               <p className="text-sm text-gray-700">
                 Overview of ongoing work and quick actions.
@@ -573,10 +559,12 @@ export default function DashboardPageClient({
         </div>
       </header>
 
-      <main className="flex-1 overflow-auto">
-        <div className="max-w-7xl mx-auto h-full px-4 py-6">
+      {/* single scroll container */}
+      <main className="flex-1 overflow-y-auto">
+        {/* removed h-full here so inner content flows normally into the main scroll */}
+        <div className="max-w-7xl mx-auto px-4 py-6">
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            <aside className="order-first lg:order-last space-y-4 h-auto">
+            <aside className="order-first lg:order-last space-y-4">
               <div className="bg-white rounded-lg shadow-sm border p-4">
                 <h3 className="text-sm font-semibold mb-2 text-black">
                   Quick Actions
@@ -617,7 +605,6 @@ export default function DashboardPageClient({
             </aside>
 
             <section className="lg:col-span-2 flex flex-col gap-4">
-              {/* initial full-page skeleton before first load completes */}
               {!initialLoadComplete ? (
                 <div className="space-y-4">
                   <div className="bg-white rounded-lg shadow-sm border p-5 animate-pulse max-w-full h-28" />
@@ -625,7 +612,6 @@ export default function DashboardPageClient({
                   <div className="bg-white rounded-lg shadow-sm border p-5 animate-pulse max-w-full h-28" />
                 </div>
               ) : projectsLoading && displayed.length === 0 ? (
-                // while fetching after initial load show card skeletons (but not the empty state)
                 <div className="space-y-4">
                   <div className="bg-white rounded-lg shadow-sm border p-5 animate-pulse max-w-full h-28" />
                   <div className="bg-white rounded-lg shadow-sm border p-5 animate-pulse max-w-full h-28" />
@@ -656,7 +642,6 @@ export default function DashboardPageClient({
                   </div>
                 </div>
               ) : displayed.length === 0 ? (
-                // only show empty state after initial load and no error
                 <div className="bg-white p-8 rounded border text-black flex flex-col items-center text-center gap-4">
                   <div className="text-lg font-semibold">No projects found</div>
                   <div className="text-sm text-gray-600">

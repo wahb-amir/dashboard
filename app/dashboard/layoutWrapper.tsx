@@ -4,7 +4,6 @@ import { useState } from "react";
 import Sidebar from "@/app/components/ui/Sidebar";
 import Navbar from "@/app/components/Navbar/Navbar";
 
-// DashboardShell.tsx (only the relevant part shown)
 export default function DashboardShell({
   children,
 }: {
@@ -18,9 +17,13 @@ export default function DashboardShell({
         isMobileMenuOpen={mobileOpen}
         setIsMobileMenuOpen={setMobileOpen}
       />
-      <Sidebar open={mobileOpen} setOpen={setMobileOpen} />
 
       <main className="relative z-0 pt-16 p-4 bp-main">{children}</main>
+
+      
+      <div className="relative z-50">
+        <Sidebar open={mobileOpen} setOpen={setMobileOpen} />
+      </div>
 
       <style jsx>{`
         /* at >=880px, reserve space for the fixed sidebar (16rem = 256px) */
@@ -34,6 +37,12 @@ export default function DashboardShell({
           .bp-main {
             margin-left: 0;
           }
+        }
+
+       
+        :global(button),
+        :global([role="button"]) {
+          cursor: pointer;
         }
       `}</style>
     </>
