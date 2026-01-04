@@ -28,6 +28,7 @@ interface Props {
   initialQuery?: string;
   user?: AuthTokenPayload | null;
   needsRefresh?: boolean;
+  redirectTo?: string;
 }
 
 const PAGE_SIZE = 5;
@@ -40,9 +41,15 @@ export default function DashboardPageClient({
   initialQuery = "",
   user = null,
   needsRefresh = false,
+  redirectTo=""
 }: Props) {
   const router = useRouter();
-
+  useEffect(() => {
+    if (redirectTo) {
+      const path = redirectTo.startsWith("/") ? redirectTo : `/${redirectTo}`;
+      router.push(path);
+    }
+  }, [redirectTo, router]);
   const [currentUser, setCurrentUser] = useState<AuthTokenPayload | null>(
     initialUser ?? user
   );
