@@ -1,6 +1,6 @@
 "use client"
 
-import { Bar, BarChart, CartesianGrid, XAxis, YAxis } from "recharts"
+import { Bar, BarChart, CartesianGrid, XAxis, YAxis, ResponsiveContainer } from "recharts"
 
 import {
   Card,
@@ -38,21 +38,21 @@ export function TasksChart() {
       </CardHeader>
       <CardContent>
         <ChartContainer config={chartConfig} className="min-h-[200px] w-full">
-          <BarChart accessibilityLayer data={taskData}>
-            <CartesianGrid vertical={false} />
-            <XAxis
-              dataKey="name"
-              tickLine={false}
-              tickMargin={10}
-              axisLine={false}
-              tickFormatter={(value) => value.slice(0, 3)}
-            />
-            <YAxis />
-            <ChartTooltip content={<ChartTooltipContent />} />
-            <ChartLegend content={<ChartLegendContent />} />
-            <Bar dataKey="tasksCompleted" fill="var(--color-tasksCompleted)" radius={4} />
-            <Bar dataKey="tasksCreated" fill="var(--color-tasksCreated)" radius={4} />
-          </BarChart>
+            <BarChart accessibilityLayer data={taskData}>
+              <CartesianGrid vertical={false} />
+              <XAxis
+                dataKey="name"
+                tickLine={false}
+                tickMargin={10}
+                axisLine={false}
+                tickFormatter={(value) => value.slice(0, 3)}
+              />
+              <YAxis />
+              <ChartTooltip content={<ChartTooltipContent />} />
+              <ChartLegend content={<ChartLegendContent />} />
+              <Bar dataKey="tasksCompleted" fill="var(--color-tasksCompleted)" radius={4} />
+              <Bar dataKey="tasksCreated" fill="var(--color-tasksCreated)" radius={4} />
+            </BarChart>
         </ChartContainer>
       </CardContent>
     </Card>

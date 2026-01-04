@@ -44,7 +44,7 @@ export default function MessagesPage() {
                   onClick={() => setSelectedUser(userId as keyof typeof messages)}
                 >
                   <Avatar className="h-9 w-9 mr-3">
-                     {avatar && <AvatarImage src={avatar.imageUrl} alt={user.name} data-ai-hint={avatar.imageHint} />}
+                     {avatar && <AvatarImage src={avatar.imageUrl} alt={user.name} />}
                     <AvatarFallback>{user.name.charAt(0)}</AvatarFallback>
                   </Avatar>
                   <div>
@@ -70,7 +70,7 @@ export default function MessagesPage() {
                         const avatar = getAvatar(user.avatar);
                         return (
                             <>
-                                {avatar && <AvatarImage src={avatar.imageUrl} alt={user.name} data-ai-hint={avatar.imageHint} />}
+                                {avatar && <AvatarImage src={avatar.imageUrl} alt={user.name} />}
                                 <AvatarFallback>{user.name.charAt(0)}</AvatarFallback>
                             </>
                         );
@@ -90,7 +90,7 @@ export default function MessagesPage() {
                                 const avatar = getAvatar(user.avatar);
                                 return (
                                     <>
-                                        {avatar && <AvatarImage src={avatar.imageUrl} alt={user.name} data-ai-hint={avatar.imageHint} />}
+                                        {avatar && <AvatarImage src={avatar.imageUrl} alt={user.name} />}
                                         <AvatarFallback>{user.name.charAt(0)}</AvatarFallback>
                                     </>
                                 );
@@ -98,7 +98,7 @@ export default function MessagesPage() {
                         </Avatar>
                     )}
                     <div className={cn(
-                      "max-w-xs lg:max-w-md rounded-lg p-3 text-sm",
+                      "max-w-xs lg:max-w-md rounded-lg p-3 text-sm break-words",
                       message.from === 'me'
                         ? "bg-primary text-primary-foreground"
                         : "bg-muted"

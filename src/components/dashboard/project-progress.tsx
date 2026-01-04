@@ -61,7 +61,7 @@ export function ProjectProgress() {
                       const avatar = getAvatar(user.avatar);
                       return (
                         <Avatar key={userId} className="border-2 border-card">
-                          {avatar && <AvatarImage src={avatar.imageUrl} alt={user.name} data-ai-hint={avatar.imageHint} />}
+                          {avatar && <AvatarImage src={avatar.imageUrl} alt={user.name} />}
                           <AvatarFallback>{user.name.charAt(0)}</AvatarFallback>
                         </Avatar>
                       )

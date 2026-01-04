@@ -37,7 +37,7 @@ export function RecentActivity() {
           return (
             <div key={activity.id} className="flex items-start gap-4">
               <Avatar className="h-9 w-9">
-                {avatar && <AvatarImage src={avatar.imageUrl} alt={user.name} data-ai-hint={avatar.imageHint} />}
+                {avatar && <AvatarImage src={avatar.imageUrl} alt={user.name} />}
                 <AvatarFallback>{user.name.charAt(0)}</AvatarFallback>
               </Avatar>
               <div className="grid gap-1">
