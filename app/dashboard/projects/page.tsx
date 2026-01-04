@@ -76,12 +76,27 @@ export default function DashboardProjectsPage({
 
       if (!res.ok) {
         let errMsg = `Failed to load projects (status ${res.status})`;
+        let destination = null;
+
         try {
           const j = await res.json();
           if (j?.message) errMsg = j.message;
-        } catch {}
+
+          if (j?.redirectTo) destination = j.redirectTo;
+        } catch(e) {
+          console.error(e)
+        }
+
         setProjectsError(errMsg);
         toast.error(errMsg);
+
+        if (destination) {
+          const path = destination.startsWith("/")
+            ? destination
+            : `/${destination}`;
+          router.push(path);
+        }
+
         return;
       }
 

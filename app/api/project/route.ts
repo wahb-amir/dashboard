@@ -71,26 +71,32 @@ function parseCookie(header: string | null, name: string): string | null {
 
 export async function validateAndFetchUser(
   refreshToken: string | null
-): Promise<{ uid: string; user: any } | { error: NextResponse } | null> {
+): Promise<
+  | { uid: string; user: any; error?: never; redirectTo?: never }
+  | { error: NextResponse; redirectTo?: string; uid?: never; user?: never }
+  | null
+> {
   // If there's an auth token attempt to use it first — but enforce version check
   if (refreshToken) {
     const authRes = verifyToken(refreshToken, "REFRESH");
     if (!authRes?.decoded) {
-      return {
-        error: NextResponse.json(
-          { ok: false, message: "Invalid or expired auth token." },
-          { status: 401 }
-        ),
-      };
+      const response = NextResponse.json(
+        { ok: false, message: "Invalid or expired auth token." },
+        { status: 401 }
+      );
+      response.cookies.delete("authToken");
+      response.cookies.delete("refreshToken");
+      return { error: response, redirectTo: "login?reason=auth" };
     } else {
       const dec = authRes.decoded as any;
       if (!dec?.uid) {
-        return {
-          error: NextResponse.json(
-            { ok: false, message: "Invalid auth token: missing uid." },
-            { status: 401 }
-          ),
-        };
+        const response = NextResponse.json(
+          { ok: false, message: "Invalid auth token: missing uid." },
+          { status: 401 }
+        );
+        response.cookies.delete("authToken");
+        response.cookies.delete("refreshToken");
+        return { error: response, redirectTo: "login?reason=auth" };
       }
 
       // prefer tokenVersion, fallback to refreshVersion if you used that name
@@ -117,13 +123,13 @@ export async function validateAndFetchUser(
 
       // Immediate revocation check
       if (user.refreshVersion !== tokenVersion) {
-        // Optionally, you could also clear cookies here by returning a Response that deletes cookies.
-        return {
-          error: NextResponse.json(
-            { ok: false, message: "Auth token revoked." },
-            { status: 401 }
-          ),
-        };
+        const response = NextResponse.json(
+          { ok: false, message: "Auth token revoked." },
+          { status: 401 }
+        );
+        response.cookies.delete("authToken");
+        response.cookies.delete("refreshToken");
+        return { error: response, redirectTo: "login?reason=auth" };
       }
 
       // Passed everything

@@ -28,6 +28,7 @@ interface Props {
   initialQuery?: string;
   user?: AuthTokenPayload | null;
   needsRefresh?: boolean;
+  redirectTo?: string;
 }
 
 const PAGE_SIZE = 5;
@@ -40,9 +41,15 @@ export default function DashboardPageClient({
   initialQuery = "",
   user = null,
   needsRefresh = false,
+  redirectTo=""
 }: Props) {
   const router = useRouter();
-
+  useEffect(() => {
+    if (redirectTo) {
+      const path = redirectTo.startsWith("/") ? redirectTo : `/${redirectTo}`;
+      router.push(path);
+    }
+  }, [redirectTo, router]);
   const [currentUser, setCurrentUser] = useState<AuthTokenPayload | null>(
     initialUser ?? user
   );
@@ -504,11 +511,13 @@ export default function DashboardPageClient({
   }
 
   return (
-    // <-- added overflow-hidden here so only `main` shows the scrollbar
-    <div className="h-screen flex flex-col bg-gray-50 overflow-hidden">
+    // FIX 1: Use min-h-screen instead of h-screen + overflow-hidden
+    // This removes the "inner scroll bar" by letting the window handle scrolling.
+    <div className="min-h-screen flex flex-col bg-gray-50">
       <header className="px-4 py-3 border-b bg-white">
         <div className="max-w-7xl mx-auto">
-          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between pb-8    ">
+          {/* FIX 2: Reduced padding-bottom from pb-8 to pb-2 to move header elements up */}
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between pb-2">
             <div>
               <h1 className="text-2xl font-bold text-black -mt-1">Projects</h1>
               <p className="text-sm text-gray-700">
@@ -559,9 +568,8 @@ export default function DashboardPageClient({
         </div>
       </header>
 
-      {/* single scroll container */}
-      <main className="flex-1 overflow-y-auto">
-        {/* removed h-full here so inner content flows normally into the main scroll */}
+      {/* FIX 3: Removed overflow-y-auto here so it flows with the page */}
+      <main className="flex-1">
         <div className="max-w-7xl mx-auto px-4 py-6">
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
             <aside className="order-first lg:order-last space-y-4">
