@@ -1,5 +1,6 @@
 // app/components/dashboard/DashboardServer.tsx
-import { cookies } from "next/headers"; // Essential for server-side fetch auth
+import { cookies } from "next/headers";
+import { redirect } from "next/navigation"; // Import native redirect
 import DashboardPageClient from "./DashboardPageClient";
 import type { AuthTokenPayload } from "@/app/utils/token";
 import type { ProjectFromDB } from "@/app/components/Projects/ProjectCard";
@@ -9,12 +10,12 @@ interface Props {
   needsRefresh: boolean;
 }
 
+// Ensure this matches the Client component exactly
 const PAGE_SIZE = 6;
 
 export default async function DashboardServer({ user, needsRefresh }: Props) {
   let initialProjects: ProjectFromDB[] = [];
   let initialHasMore = true;
-  let redirectTo: string | undefined = undefined; // Initialize variable
 
   try {
     const cookieStore = await cookies();
@@ -24,7 +25,6 @@ export default async function DashboardServer({ user, needsRefresh }: Props) {
       {
         cache: "no-store",
         headers: {
-          // Forward cookies so the API can check for revocation
           Cookie: cookieStore.toString(),
         },
       }
@@ -39,12 +39,16 @@ export default async function DashboardServer({ user, needsRefresh }: Props) {
           ? data.total > PAGE_SIZE
           : initialProjects.length === PAGE_SIZE;
     } else {
-      // Capture the redirect instruction from the API error response
+      // HANDLE REDIRECT HERE: Prevents flash of content on client
       if (data.redirectTo) {
-        redirectTo = data.redirectTo;
+        redirect(data.redirectTo);
       }
     }
   } catch (error) {
+    // If the error was the redirect() thrown above, let it pass
+    if ((error as any)?.digest?.startsWith("NEXT_REDIRECT")) {
+      throw error;
+    }
     console.error("Fetch error in DashboardServer:", error);
   }
 
@@ -56,7 +60,7 @@ export default async function DashboardServer({ user, needsRefresh }: Props) {
       initialPage={0}
       initialHasMore={initialHasMore}
       initialQuery=""
-      redirectTo={redirectTo} 
+      // redirectTo prop removed as it is handled server-side
     />
   );
 }

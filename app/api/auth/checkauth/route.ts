@@ -51,28 +51,29 @@ export async function GET(req: Request) {
     if (refreshCookie) {
       const refreshRes = verifyToken(refreshCookie, "REFRESH");
       if (refreshRes?.decoded) {
-        const decoded = refreshRes.decoded;
-        const payload: AuthTokenPayload = {
+        const decoded = refreshRes.decoded as AuthTokenPayload;
+
+        // 🔐 Payload for AUTH token (NO version)
+        const authPayload = {
           uid: decoded.uid,
           email: decoded.email,
-          role: decoded.role || "client",
-          name: decoded.name || "",
+          role: decoded.role,
+          name: decoded.name,
+          company: decoded.company,
+        };
+        const refreshPayload = {
+          ...authPayload,
+          version: decoded.version,
         };
 
-        // Generate new tokens:
-        // - newAuthToken: short-lived access token
-        // - newRefreshToken: long-lived refresh token (rotated)
-        // We try to call generateToken(payload, type). If your generateToken only supports one arg,
-        // the wrapper above allows that (it will still work at runtime).
-        const newAuthToken = gen(payload, "AUTH");
-        const newRefreshToken = gen(payload, "REFRESH");
+        const newAuthToken = gen(authPayload, "AUTH");
+        const newRefreshToken = gen(refreshPayload, "REFRESH");
 
         const res = NextResponse.json(
-          { auth: true, user: payload },
+          { auth: true, user: authPayload },
           { status: 200 }
         );
 
-        // Set rotated cookies (maxAge in seconds)
         res.cookies.set({
           name: "authToken",
           value: newAuthToken,
@@ -80,7 +81,7 @@ export async function GET(req: Request) {
           secure: process.env.NODE_ENV === "production",
           sameSite: "strict",
           path: "/",
-          maxAge: 60 * 60, // 1 hour
+          maxAge: 60 * 60,
         });
 
         res.cookies.set({
@@ -90,34 +91,11 @@ export async function GET(req: Request) {
           secure: process.env.NODE_ENV === "production",
           sameSite: "strict",
           path: "/",
-          maxAge: 7 * 24 * 60 * 60, // 7 days
+          maxAge: 7 * 24 * 60 * 60,
         });
 
-        // Properly handle appToken:
-        // - if appToken existed but is invalid -> delete it
-        // - if appToken existed and is valid -> optionally refresh it (we regenerate here),
-        //   so the client keeps a fresh app-scoped token (non-httpOnly by default)
-        if (appCookie) {
-          const appVerify = verifyToken(appCookie, "APP");
-          if (!appVerify?.decoded) {
-            res.cookies.delete("appToken");
-          } else {
-            // regenerate app token so it stays in sync (client-accessible)
-            const newAppToken = gen(payload, "APP");
-            res.cookies.set({
-              name: "appToken",
-              value: newAppToken,
-              httpOnly: false, // client-side token
-              secure: process.env.NODE_ENV === "production",
-              sameSite: "strict",
-              path: "/",
-              maxAge: 60 * 60, // 1 hour (adjust as needed)
-            });
-          }
-        }
-
         return res;
-      } // end if refresh valid
+      }
     }
 
     // 3) No valid tokens -> not authenticated

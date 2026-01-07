@@ -1,5 +1,5 @@
 {
-  "name": "app",
+  "name": "dashboard",
   "version": "0.1.0",
   "private": true,
   "scripts": {
@@ -9,6 +9,7 @@
     "lint": "eslint"
   },
   "dependencies": {
+    "@types/nodemailer": "^7.0.4",
     "@types/validator": "^13.15.10",
     "axios": "^1.13.2",
     "bcrypt": "^6.0.0",
