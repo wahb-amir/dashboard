@@ -54,13 +54,12 @@ export default async function DashboardServer({ user, needsRefresh }: Props) {
 
   return (
     <DashboardPageClient
-      initialUser={user}
+      initialUser={user} 
       needsRefresh={needsRefresh}
-      initialProjects={initialProjects}
+      initialProjects={initialProjects} 
       initialPage={0}
       initialHasMore={initialHasMore}
       initialQuery=""
-      // redirectTo prop removed as it is handled server-side
     />
   );
 }

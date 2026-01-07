@@ -46,6 +46,20 @@ export default function DashboardProjectsPage({
   // abort controller ref to cancel inflight fetches
   const controllerRef = useRef<AbortController | null>(null);
 
+  // Type guard: narrow unknown -> ProjectFromDB[]
+  const isProjectArray = (v: unknown): v is ProjectFromDB[] => {
+    if (!Array.isArray(v)) return false;
+    return v.every((item) => {
+      // basic sanity: item is object and has either _id or id (adjust if your schema differs)
+      return (
+        item !== null &&
+        typeof item === "object" &&
+        (("_id" in (item as any) && typeof (item as any)._id === "string") ||
+          ("id" in (item as any) && typeof (item as any).id === "string"))
+      );
+    });
+  };
+
   // load a page of projects. append=true will append to existing list.
   const loadProjects = async (loadPage = 0, append = false) => {
     // abort previous
@@ -76,15 +90,14 @@ export default function DashboardProjectsPage({
 
       if (!res.ok) {
         let errMsg = `Failed to load projects (status ${res.status})`;
-        let destination = null;
+        let destination: string | null = null;
 
         try {
           const j = await res.json();
           if (j?.message) errMsg = j.message;
-
           if (j?.redirectTo) destination = j.redirectTo;
-        } catch(e) {
-          console.error(e)
+        } catch (e) {
+          console.error(e);
         }
 
         setProjectsError(errMsg);
@@ -100,22 +113,44 @@ export default function DashboardProjectsPage({
         return;
       }
 
-      const data = await res.json().catch(() => null);
-      if (!data) {
-        setProjectsError("Invalid project data returned from server.");
-        toast.error("Invalid project data returned from server.");
-        return;
-      }
+      // parse JSON safely (returns unknown)
+      const raw = await res.json(); // unknown
 
-      const loaded: ProjectFromDB[] = Array.isArray(data)
-        ? data
-        : data.projects ?? [];
+      // type guard
+      const isProjectArray = (v: unknown): v is ProjectFromDB[] =>
+        Array.isArray(v) &&
+        v.every(
+          (item) =>
+            item &&
+            typeof item === "object" &&
+            "_id" in item &&
+            typeof (item as any)._id === "string"
+        );
+
+      // determine loaded array
+      let loaded: ProjectFromDB[] = [];
+
+      if (isProjectArray(raw)) {
+        loaded = raw; // ✅ now TS knows this is ProjectFromDB[]
+      } else if (
+        raw &&
+        typeof raw === "object" &&
+        isProjectArray((raw as any).projects)
+      ) {
+        loaded = (raw as any).projects; // ✅ type assertion
+      } else {
+        loaded = []; // fallback
+      }
 
       setProjects((prev) => (append ? [...prev, ...loaded] : loaded));
 
       // set hasMore based on server total if provided, otherwise based on page size heuristic
-      if (!Array.isArray(data) && typeof data.total === "number") {
-        const total = data.total;
+      if (
+        !Array.isArray(raw) &&
+        raw &&
+        typeof (raw as any).total === "number"
+      ) {
+        const total = (raw as any).total as number;
         const fetchedSoFar = (loadPage + 1) * PAGE_SIZE;
         setHasMore(fetchedSoFar < total);
       } else {
@@ -323,33 +358,21 @@ export default function DashboardProjectsPage({
         </div>
       </div>
 
-      {/* projects grid */}
       <div className="grid grid-cols-1 bp-grid gap-6">
-        {projectsLoading && projects.length === 0 ? (
-          // initial load skeletons
-          <>
-            <SkeletonProjectCard />
-            <SkeletonProjectCard />
-            <SkeletonProjectCard />
-            <SkeletonProjectCard />
-          </>
-        ) : (
-          <>
-            {filtered.length === 0 ? (
-              <div className="bg-white rounded-lg shadow-sm border p-6 col-span-full text-center text-gray-700">
-                No projects found. Create your first project to get started.
-              </div>
-            ) : (
-              filtered.map((p) => (
-                <ProjectCard
-                  key={p._id ?? (p as any).id}
-                  project={p}
-                  currentUser={currentUser}
-                  onView={(id) => router.push(`/dashboard/projects/${id}`)}
-                />
-              ))
-            )}
-          </>
+        {(projectsLoading && projects.length === 0
+          ? Array.from({ length: PAGE_SIZE })
+          : filtered
+        ).map((p, i) =>
+          projectsLoading && projects.length === 0 ? (
+            <SkeletonProjectCard key={i} />
+          ) : (
+            <ProjectCard
+              key={p._id ?? (p as any).id}
+              project={p}
+              currentUser={currentUser}
+              onView={(id) => router.push(`/dashboard/projects/${id}`)}
+            />
+          )
         )}
       </div>
 

@@ -374,7 +374,25 @@ export default function DashboardPageClient({
   // Skeleton UI
   if (!currentUser && !failed) {
     return (
-      <div className="max-w-7xl mx-auto p-6 animate-pulse">Loading...</div>
+      <div className="min-h-screen flex flex-col bg-gray-50">
+        <header className="px-4 py-3 border-b bg-white animate-pulse">
+          <div className="max-w-7xl mx-auto h-12 bg-gray-200 rounded" />
+        </header>
+        <main className="flex-1 max-w-7xl mx-auto px-4 py-6 w-full grid grid-cols-1 lg:grid-cols-3 gap-6">
+          <aside className="order-first lg:order-last space-y-4">
+            <div className="bg-white rounded-lg shadow-sm border p-4 h-48 animate-pulse" />
+            <div className="bg-white rounded-lg shadow-sm border p-4 h-48 animate-pulse" />
+          </aside>
+          <section className="lg:col-span-2 space-y-4">
+            {Array.from({ length: PAGE_SIZE }).map((_, i) => (
+              <div
+                key={i}
+                className="h-40 bg-white rounded shadow animate-pulse"
+              />
+            ))}
+          </section>
+        </main>
+      </div>
     );
   }
 
@@ -440,11 +458,10 @@ export default function DashboardPageClient({
                 Create Project <Plus size={16} />
               </button>
             </div>
-              <LiveChat
-                userEmail={currentUser?.email ?? null}
-                userName={currentUser?.name ?? "You"}
-              />
-            
+            <LiveChat
+              userEmail={currentUser?.email ?? null}
+              userName={currentUser?.name ?? "You"}
+            />
           </aside>
 
           {/* Project List */}
