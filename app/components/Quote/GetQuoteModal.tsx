@@ -50,14 +50,6 @@ export default function GetQuoteModal({ open, onClose, onRequested }: Props) {
   };
   const minDeadline = getMinDate();
 
-  // autosize textarea
-  useEffect(() => {
-    const t = descRef.current;
-    if (!t) return;
-    t.style.height = "auto";
-    t.style.height = `${t.scrollHeight}px`;
-  }, [description]);
-
   // reset when modal closed / focus when opened
   useEffect(() => {
     if (!open) {
@@ -226,10 +218,10 @@ export default function GetQuoteModal({ open, onClose, onRequested }: Props) {
         ref={modalRef}
         onClick={(e) => e.stopPropagation()}
         role="document"
-        className="relative z-10 w-full max-w-2xl bg-white rounded-2xl shadow-2xl ring-1 ring-black/5 overflow-hidden transform translate-y-0 transition-all duration-200 mx-auto"
+        className="relative z-10 w-full max-w-2xl bg-white rounded-2xl shadow-2xl ring-1 ring-black/5 overflow-hidden transform translate-y-0 transition-all duration-200 mx-auto flex flex-col max-h-[90vh]"
       >
         {/* header */}
-        <div className="flex items-center gap-4 px-6 py-4 border-b">
+        <div className="flex items-center gap-4 px-6 py-4 border-b flex-shrink-0">
           <div className="flex items-center gap-3">
             <div>
               <div className="text-lg font-semibold text-black">
@@ -307,7 +299,7 @@ export default function GetQuoteModal({ open, onClose, onRequested }: Props) {
         </div>
 
         {/* body */}
-        <div className="px-6 py-6">
+        <div className="px-6 py-6 overflow-y-auto flex-1">
           {/* Step 0: Contact */}
           {step === 0 && (
             <div className="space-y-4">
@@ -374,7 +366,7 @@ export default function GetQuoteModal({ open, onClose, onRequested }: Props) {
                   placeholder="Describe the goals, deliverables, timeline, etc."
                   rows={4}
                   maxLength={DESCRIPTION_MAX}
-                  className="mt-2 block w-full rounded-md border px-3 py-2 resize-none overflow-hidden text-black focus:outline-none focus:ring-2 focus:ring-blue-300"
+                  className="mt-2 block w-full rounded-md border px-3 py-2 resize-none overflow-y-auto focus:outline-none focus:ring-2 focus:ring-blue-300 text-black h-32"
                 />
                 <div className="mt-2 flex items-center justify-between text-sm">
                   <div>
@@ -473,24 +465,26 @@ export default function GetQuoteModal({ open, onClose, onRequested }: Props) {
               {/* Review block */}
               <div className="pt-2 border-t">
                 <div className="text-sm text-gray-600 mb-2">Review</div>
-                <div className="bg-gray-50 rounded p-3 text-sm text-gray-800">
+                <div className="bg-gray-50 rounded p-3 text-sm text-gray-800 max-h-48 overflow-y-auto">
                   <div className="font-medium">{name || "—"}</div>
                   {email && (
                     <div className="text-xs text-gray-600">{email}</div>
                   )}
-                  <div className="mt-2">{description || "—"}</div>
+                  <div className="mt-2 whitespace-pre-wrap">
+                    {description || "—"}
+                  </div>
                   <div className="mt-2 flex gap-3 text-xs">
                     <div>
-                      Budget:{" "}
+                      {/* Budget:{" "}
                       <span className="font-medium">
                         {budgetRaw ? `$${formattedBudget()}` : "Not specified"}
-                      </span>
+                      </span> */}
                     </div>
                     <div>
-                      Deadline:{" "}
+                      {/* Deadline:{" "}
                       <span className="font-medium">
                         {deadline || "Not specified"}
-                      </span>
+                      </span> */}
                     </div>
                   </div>
                 </div>
@@ -500,7 +494,7 @@ export default function GetQuoteModal({ open, onClose, onRequested }: Props) {
         </div>
 
         {/* footer */}
-        <div className="px-6 py-4 border-t flex items-center justify-between gap-3">
+        <div className="px-6 py-4 border-t flex items-center justify-between gap-3 flex-shrink-0">
           <div className="flex items-center gap-2">
             {step > 0 && (
               <button

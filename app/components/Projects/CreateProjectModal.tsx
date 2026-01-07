@@ -49,14 +49,6 @@ export default function CreateProjectModal({ open, onClose, onCreate }: Props) {
 
   const minDeadline = getMinDate();
 
-  // auto-expand textarea
-  useEffect(() => {
-    const t = descRef.current;
-    if (!t) return;
-    t.style.height = "auto";
-    t.style.height = `${t.scrollHeight}px`;
-  }, [description]);
-
   // reset when modal closed / focus first input on open
   useEffect(() => {
     if (!open) {
@@ -356,11 +348,11 @@ export default function CreateProjectModal({ open, onClose, onCreate }: Props) {
                   ref={descRef}
                   value={description}
                   onChange={(e) => setDescription(e.target.value)}
-                  placeholder="Describe the goals, scope or anything important. This field will expand as you type."
-                  rows={2}
+                  placeholder="Describe the goals, scope or anything important."
+                  rows={5}
                   maxLength={DESCRIPTION_MAX}
                   aria-invalid={descTooShort || descTooLong}
-                  className="mt-2 block w-full rounded-md border px-3 py-2 resize-none overflow-hidden focus:outline-none focus:ring-2 focus:ring-blue-300 text-black"
+                  className="mt-2 block w-full rounded-md border px-3 py-2 resize-none overflow-y-auto focus:outline-none focus:ring-2 focus:ring-blue-300 text-black h-32"
                 />
                 <div className="mt-2 flex items-center justify-between text-sm">
                   <div>
