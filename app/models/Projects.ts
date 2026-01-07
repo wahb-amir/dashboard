@@ -36,6 +36,7 @@ export interface IProject extends Document {
   userId: string;
   title: string;
   company?: string | null;
+  description?: string;
   dueDate?: Date | null;
   email?: string | null;
   contactName?: string | null;
@@ -97,6 +98,7 @@ const ProjectSchema = new Schema<IProject>(
     dueDate: { type: Date, default: null },
     email: { type: String, default: null },
     contactName: { type: String, default: null },
+    description: { type: String, default: "" },
     steps: { type: [StepSchema], default: [] },
     currentFocus: {
       type: String,
@@ -138,7 +140,9 @@ const ProjectSchema = new Schema<IProject>(
  * Avoid TS error when reading mongoose.models['Project']:
  * cast existing model to Model<IProject> if present.
  */
-const existingModel = (mongoose.models && (mongoose.models["Project"] as Model<IProject>)) || undefined;
+const existingModel =
+  (mongoose.models && (mongoose.models["Project"] as Model<IProject>)) ||
+  undefined;
 
 const Project: Model<IProject> =
   existingModel || mongoose.model<IProject>("Project", ProjectSchema);
