@@ -1,13 +1,14 @@
 "use client";
 
 import React, { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { X, Clock, Check } from "lucide-react";
 
-  type ProjectPayload = {
+type ProjectPayload = {
   name: string;
   description: string;
   budget: number | null;
-  deadline: string; 
+  deadline: string;
 };
 
 type Props = {
@@ -18,21 +19,21 @@ type Props = {
 
 const TWO_DAYS_IN_MS = 2 * 24 * 60 * 60 * 1000;
 
-// Validation limits (tweak as needed)
+// Validation limits
 const DESCRIPTION_MIN = 10;
 const DESCRIPTION_MAX = 1000;
-const BUDGET_MIN = 1; // minimum $1
-const BUDGET_MAX = 1_000_000; // maximum $1,000,000
+const BUDGET_MIN = 1;
+const BUDGET_MAX = 1_000_000;
 
 export default function CreateProjectModal({ open, onClose, onCreate }: Props) {
-  const [step, setStep] = useState(0); // 0: scope, 1: budget, 2: deadline
+  const [step, setStep] = useState(0);
   const [submitting, setSubmitting] = useState(false);
 
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const descRef = useRef<HTMLTextAreaElement | null>(null);
 
-  const [budgetRaw, setBudgetRaw] = useState(""); // user input string
+  const [budgetRaw, setBudgetRaw] = useState("");
   const [deadline, setDeadline] = useState("");
 
   const modalRef = useRef<HTMLDivElement | null>(null);
@@ -56,10 +57,10 @@ export default function CreateProjectModal({ open, onClose, onCreate }: Props) {
     t.style.height = `${t.scrollHeight}px`;
   }, [description]);
 
-  // reset when modal closed
+  // reset when modal closed / focus first input on open
   useEffect(() => {
     if (!open) {
-      setTimeout(() => {
+      const t = setTimeout(() => {
         setStep(0);
         setSubmitting(false);
         setName("");
@@ -67,15 +68,26 @@ export default function CreateProjectModal({ open, onClose, onCreate }: Props) {
         setBudgetRaw("");
         setDeadline("");
       }, 160); // allow closing animation
+      return () => clearTimeout(t);
     } else {
-      // focus first input on open
-      setTimeout(() => {
+      const t = setTimeout(() => {
         const el = document.getElementById(
           "project-name-input"
         ) as HTMLInputElement | null;
         el?.focus();
       }, 120);
+      return () => clearTimeout(t);
     }
+  }, [open]);
+
+  // lock body scroll when open
+  useEffect(() => {
+    if (!open) return;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = prev;
+    };
   }, [open]);
 
   // close on Escape
@@ -87,19 +99,6 @@ export default function CreateProjectModal({ open, onClose, onCreate }: Props) {
     return () => window.removeEventListener("keydown", onKey);
   }, [open, onClose]);
 
-  // click outside to close
-  useEffect(() => {
-    function onDocClick(e: MouseEvent) {
-      if (!open) return;
-      if (!modalRef.current) return;
-      if (!modalRef.current.contains(e.target as Node)) {
-        onClose();
-      }
-    }
-    document.addEventListener("mousedown", onDocClick);
-    return () => document.removeEventListener("mousedown", onDocClick);
-  }, [open, onClose]);
-
   // helper: parse budget string to number (handles commas)
   const parseBudget = (raw: string) => {
     const cleaned = raw.replace(/,/g, "").replace(/[^\d.]/g, "");
@@ -107,7 +106,7 @@ export default function CreateProjectModal({ open, onClose, onCreate }: Props) {
     return Number(cleaned);
   };
 
-  // simple validators (updated for description + budget limits)
+  // validators
   const validateStep = (s: number) => {
     if (s === 0) {
       const nameOk = name.trim().length >= 2;
@@ -133,7 +132,6 @@ export default function CreateProjectModal({ open, onClose, onCreate }: Props) {
     if (!budgetRaw) return "";
     const val = parseBudget(budgetRaw);
     if (isNaN(val)) return budgetRaw;
-    // show up to 2 decimal places (but drop .00)
     const opts: Intl.NumberFormatOptions = {
       maximumFractionDigits: 2,
       minimumFractionDigits: 0,
@@ -148,7 +146,6 @@ export default function CreateProjectModal({ open, onClose, onCreate }: Props) {
   const goBack = () => setStep((s) => Math.max(0, s - 1));
 
   const submit = async () => {
-    // final validation (ensure budget is within limits again)
     if (!validateStep(2)) return;
 
     const parsedBudget = budgetRaw.trim()
@@ -175,22 +172,15 @@ export default function CreateProjectModal({ open, onClose, onCreate }: Props) {
       deadline,
     };
     try {
-      const server = await fetch("/api/project", {
+      await fetch("/api/project", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body:JSON.stringify(payload)
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
       });
-
-      const res = await server.json();
-
-      
       setStep(0);
       onClose();
     } catch (err) {
       console.error(err);
-      // show inline error or toast - keep it simple
       alert("Unable to create project. Try again.");
     } finally {
       setSubmitting(false);
@@ -199,7 +189,7 @@ export default function CreateProjectModal({ open, onClose, onCreate }: Props) {
 
   if (!open) return null;
 
-  // derived UI error states for friendly messages
+  // derived UI error states
   const descLen = description.trim().length;
   const descTooShort = descLen > 0 && descLen < DESCRIPTION_MIN;
   const descTooLong = descLen > DESCRIPTION_MAX;
@@ -210,7 +200,6 @@ export default function CreateProjectModal({ open, onClose, onCreate }: Props) {
   const budgetTooSmall = !budgetNaN && !budgetEmpty && budgetVal < BUDGET_MIN;
   const budgetTooLarge = !budgetNaN && !budgetEmpty && budgetVal > BUDGET_MAX;
 
-  // button states: 3 distinct visual states
   const btnDisabled = !validateStep(step) || submitting;
   const btnClass = submitting
     ? "bg-blue-600 text-white"
@@ -218,21 +207,29 @@ export default function CreateProjectModal({ open, onClose, onCreate }: Props) {
     ? "bg-gray-100 text-gray-400 cursor-not-allowed"
     : "bg-blue-600 text-white hover:brightness-95";
 
-  return (
-    // backdrop + center
+  // portal mount target
+  const target = typeof document !== "undefined" ? document.body : null;
+  if (!target) return null;
+
+  return createPortal(
     <div
-      className="fixed inset-0 z-9999 flex items-center justify-center min-h-screen px-4 sm:px-6"
+      className="fixed inset-0 flex items-center justify-center px-4 sm:px-6"
+      style={{ zIndex: 99999 }}
       aria-modal="true"
       role="dialog"
       aria-label="Create project"
     >
-      {/* dark overlay */}
-      <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" />
+      {/* backdrop (click to close) */}
+      <div
+        className="absolute inset-0 bg-black/40 backdrop-blur-sm"
+        onClick={onClose}
+      />
 
       {/* modal panel */}
       <div
         ref={modalRef}
-        // ensure it's centered and doesn't shift up: use mx-auto and translate-y-0
+        onClick={(e) => e.stopPropagation()}
+        role="document"
         className="relative z-10 w-full max-w-2xl bg-white rounded-2xl shadow-2xl ring-1 ring-black/5 overflow-hidden transform translate-y-0 transition-all duration-200 mx-auto"
       >
         {/* header + close */}
@@ -402,7 +399,6 @@ export default function CreateProjectModal({ open, onClose, onCreate }: Props) {
                     inputMode="numeric"
                     value={budgetRaw}
                     onChange={(e) => {
-                      // allow numbers, commas, dot
                       const allowed = e.target.value.replace(/[^\d.,]/g, "");
                       setBudgetRaw(allowed);
                     }}
@@ -411,7 +407,6 @@ export default function CreateProjectModal({ open, onClose, onCreate }: Props) {
                     aria-invalid={budgetNaN || budgetTooSmall || budgetTooLarge}
                     className="block w-full rounded-md border px-3 py-2 pr-12 focus:outline-none focus:ring-2 focus:ring-blue-300 text-black"
                   />
-                  {/* trailing dollar sign */}
                   <div className="absolute right-2 top-1/2 -translate-y-1/2 text-sm text-gray-600 px-2">
                     $
                   </div>
@@ -506,18 +501,13 @@ export default function CreateProjectModal({ open, onClose, onCreate }: Props) {
 
             <button
               onClick={() => {
-                // Skip to next or submit
-                if (step < 2) {
-                  goNext();
-                } else {
-                  submit();
-                }
+                if (step < 2) goNext();
+                else submit();
               }}
               disabled={btnDisabled}
               className={`inline-flex items-center gap-2 px-4 py-2 rounded-md transition ${btnClass}`}
             >
               {submitting && (
-                // small spinner — stays visible against blue bg
                 <svg
                   className="animate-spin -ml-1 mr-2 h-4 w-4 text-white"
                   xmlns="http://www.w3.org/2000/svg"
@@ -554,6 +544,7 @@ export default function CreateProjectModal({ open, onClose, onCreate }: Props) {
           </div>
         </div>
       </div>
-    </div>
+    </div>,
+    target
   );
 }

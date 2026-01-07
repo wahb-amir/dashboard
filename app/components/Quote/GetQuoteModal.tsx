@@ -2,6 +2,7 @@
 "use client";
 
 import React, { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { X, Clock, Check } from "lucide-react";
 
 export type QuotePayload = {
@@ -60,7 +61,7 @@ export default function GetQuoteModal({ open, onClose, onRequested }: Props) {
   // reset when modal closed / focus when opened
   useEffect(() => {
     if (!open) {
-      setTimeout(() => {
+      const t = setTimeout(() => {
         setStep(0);
         setName("");
         setEmail("");
@@ -69,25 +70,35 @@ export default function GetQuoteModal({ open, onClose, onRequested }: Props) {
         setDeadline("");
         setSubmitting(false);
       }, 160);
+      return () => clearTimeout(t);
     } else {
-      setTimeout(() => {
+      const t = setTimeout(() => {
         const el = document.getElementById(
           "quote-name"
         ) as HTMLInputElement | null;
         el?.focus();
       }, 120);
+      return () => clearTimeout(t);
     }
   }, [open]);
 
-  // click outside to close
+  // lock body scroll when open
   useEffect(() => {
-    function onDocClick(e: MouseEvent) {
-      if (!open) return;
-      if (!modalRef.current) return;
-      if (!modalRef.current.contains(e.target as Node)) onClose();
+    if (!open) return;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = prev;
+    };
+  }, [open]);
+
+  // close on Escape
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") onClose();
     }
-    document.addEventListener("mousedown", onDocClick);
-    return () => document.removeEventListener("mousedown", onDocClick);
+    if (open) window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
   }, [open, onClose]);
 
   const parseBudget = (raw: string) => {
@@ -157,18 +168,10 @@ export default function GetQuoteModal({ open, onClose, onRequested }: Props) {
 
     try {
       // *** REPLACE THIS MOCK WITH REAL API CALL ***
-      // Example:
-      // await fetch('/api/quotes', {
-      //   method: 'POST',
-      //   headers: { 'Content-Type': 'application/json' },
-      //   body: JSON.stringify(payload),
-      // });
       await new Promise((r) => setTimeout(r, 900));
       // *** END REPLACE ***
 
-      // notify parent so page can refresh
       await (onRequested ? onRequested(payload) : Promise.resolve());
-      // reset & close
       setStep(0);
       onClose();
     } catch (err) {
@@ -200,17 +203,29 @@ export default function GetQuoteModal({ open, onClose, onRequested }: Props) {
     ? "bg-gray-100 text-gray-400 cursor-not-allowed"
     : "bg-blue-600 text-white hover:brightness-95";
 
-  return (
-    <div
-  className="fixed inset-0 z-9999 flex items-center justify-center min-h-screen px-4 sm:px-6"
-  aria-modal="true"
-  role="dialog"
-  aria-label="Request a quote"
->
-      <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" />
+  // portal mount target
+  const target = typeof document !== "undefined" ? document.body : null;
+  if (!target) return null;
 
+  return createPortal(
+    <div
+      className="fixed inset-0 flex items-center justify-center px-4 sm:px-6"
+      style={{ zIndex: 99999 }}
+      aria-modal="true"
+      role="dialog"
+      aria-label="Request a quote"
+    >
+      {/* backdrop (click to close) */}
+      <div
+        className="absolute inset-0 bg-black/40 backdrop-blur-sm"
+        onClick={onClose}
+      />
+
+      {/* modal panel */}
       <div
         ref={modalRef}
+        onClick={(e) => e.stopPropagation()}
+        role="document"
         className="relative z-10 w-full max-w-2xl bg-white rounded-2xl shadow-2xl ring-1 ring-black/5 overflow-hidden transform translate-y-0 transition-all duration-200 mx-auto"
       >
         {/* header */}
@@ -269,7 +284,6 @@ export default function GetQuoteModal({ open, onClose, onRequested }: Props) {
                     </div>
                   </div>
 
-                  {/* progress line */}
                   {i < 2 && (
                     <div className="mt-3 h-1 bg-gray-100 rounded-full">
                       <div
@@ -542,6 +556,7 @@ export default function GetQuoteModal({ open, onClose, onRequested }: Props) {
           </div>
         </div>
       </div>
-    </div>
+    </div>,
+    target
   );
 }
