@@ -358,22 +358,29 @@ export default function DashboardProjectsPage({
         </div>
       </div>
 
+      {/* projects grid */}
       <div className="grid grid-cols-1 bp-grid gap-6">
-        {(projectsLoading && projects.length === 0
-          ? Array.from({ length: PAGE_SIZE })
-          : filtered
-        ).map((p, i) =>
-          projectsLoading && projects.length === 0 ? (
-            <SkeletonProjectCard key={i} />
-          ) : (
-            <ProjectCard
-              key={p._id ?? (p as any).id}
-              project={p}
-              currentUser={currentUser}
-              onView={(id) => router.push(`/dashboard/projects/${id}`)}
-            />
-          )
-        )}
+        {(() => {
+          // placeholders typed as ProjectFromDB | null
+          const placeholders = Array.from({ length: PAGE_SIZE }).map(
+            () => null
+          ) as (ProjectFromDB | null)[];
+          const items: (ProjectFromDB | null)[] =
+            projectsLoading && projects.length === 0 ? placeholders : filtered;
+
+          return items.map((p, i) =>
+            p === null ? (
+              <SkeletonProjectCard key={`skeleton-${i}`} />
+            ) : (
+              <ProjectCard
+                key={p._id ?? (p as any).id}
+                project={p}
+                currentUser={currentUser}
+                onView={(id) => router.push(`/dashboard/projects/${id}`)}
+              />
+            )
+          );
+        })()}
       </div>
 
       {/* bottom actions: Refresh + See more projects */}
