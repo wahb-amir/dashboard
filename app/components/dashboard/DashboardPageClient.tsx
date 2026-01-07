@@ -499,7 +499,7 @@ export default function DashboardPageClient({
                 <button
                   onClick={handleLoadMore}
                   disabled={projectsLoading}
-                  className="px-4 py-2 border bg-white rounded hover:bg-gray-50 disabled:opacity-50"
+                  className="px-4 py-2 border bg-white rounded hover:bg-gray-50 disabled:opacity-50 text-black"
                 >
                   {projectsLoading ? "Loading..." : "See more projects"}
                 </button>
