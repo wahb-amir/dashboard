@@ -150,38 +150,43 @@ export default function CreateProjectModal({ open, onClose, onCreate }: Props) {
 
     const parsedBudget = budgetRaw.trim()
       ? parseBudget(budgetRaw.trim().replace(/,/g, ""))
-      : NaN;
-
-    if (
-      budgetRaw.trim() &&
-      (isNaN(parsedBudget) ||
-        parsedBudget < BUDGET_MIN ||
-        parsedBudget > BUDGET_MAX)
-    ) {
-      alert(`Budget must be a number between ${BUDGET_MIN} and ${BUDGET_MAX}.`);
-      return;
-    }
+      : null;
 
     setSubmitting(true);
+
     const payload: ProjectPayload = {
       name: name.trim(),
       description: description.trim(),
-      budget: budgetRaw.trim()
-        ? parseBudget(budgetRaw.replace(/,/g, ""))
-        : null,
+      budget: parsedBudget,
       deadline,
     };
+
     try {
-      await fetch("/api/project", {
+      const res = await fetch("/api/project", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
+
+      const data = await res.json();
+
+      if (!res.ok) throw new Error(data?.message || "Failed to create project");
+
+      // Call the parent callback so dashboard updates immediately
+      if (onCreate) {
+        await onCreate(data.project ?? data ?? payload); // make sure we pass the created project
+      }
+
+      // Reset and close modal
       setStep(0);
       onClose();
-    } catch (err) {
+      setName("");
+      setDescription("");
+      setBudgetRaw("");
+      setDeadline("");
+    } catch (err: any) {
       console.error(err);
-      alert("Unable to create project. Try again.");
+      alert(err.message || "Unable to create project. Try again.");
     } finally {
       setSubmitting(false);
     }
