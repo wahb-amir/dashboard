@@ -440,12 +440,11 @@ export default function DashboardPageClient({
                 Create Project <Plus size={16} />
               </button>
             </div>
-            <div className="bg-white rounded-lg shadow-sm border p-4">
               <LiveChat
                 userEmail={currentUser?.email ?? null}
                 userName={currentUser?.name ?? "You"}
               />
-            </div>
+            
           </aside>
 
           {/* Project List */}
