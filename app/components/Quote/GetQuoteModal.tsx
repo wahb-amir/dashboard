@@ -1,19 +1,25 @@
-// components/GetQuoteModal.tsx
 "use client";
 
 import React, { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { X, Clock, Check } from "lucide-react";
 
+export type QuoteStatus =
+  | "pending"
+  | "reviewing"
+  | "sent"
+  | "accepted"
+  | "rejected";
+
 export type QuotePayload = {
-  id?: string;
+  id: string;
   name: string;
   email?: string;
-  description: string;
+  description?: string;
   budget?: number | null;
-  deadline?: string | null; // yyyy-mm-dd
-  createdAt?: string;
-  status?: "pending" | "sent" | "accepted" | "rejected";
+  deadline?: string | null;
+  status?: QuoteStatus;
+  createdAt: string;
 };
 
 type Props = {
@@ -22,10 +28,10 @@ type Props = {
   onRequested?: (q: QuotePayload) => Promise<void> | void; // called after success
 };
 
-// Validation constants (tweak if you like)
+// Validation constants
 const DESCRIPTION_MIN = 10;
 const DESCRIPTION_MAX = 2000;
-const BUDGET_MIN = 0;
+const BUDGET_MIN = 1;
 const BUDGET_MAX = 5_000_000;
 const TWO_DAYS_IN_MS = 2 * 24 * 60 * 60 * 1000;
 
@@ -115,21 +121,20 @@ export default function GetQuoteModal({ open, onClose, onRequested }: Props) {
   // per-step validation
   const validateStep = (s: number) => {
     if (s === 0) {
-      // contact: name required, email optional but must be valid if present
       return name.trim().length >= 2 && validEmail(email);
     }
     if (s === 1) {
-      // scope: description required within limits
       const len = description.trim().length;
       return len >= DESCRIPTION_MIN && len <= DESCRIPTION_MAX;
     }
     if (s === 2) {
-      // budget/deadline: budget optional but numeric and within limits; deadline optional but >= min
-      if (budgetRaw.trim()) {
-        const val = parseBudget(budgetRaw);
-        if (isNaN(val) || !isFinite(val)) return false;
-        if (val < BUDGET_MIN || val > BUDGET_MAX) return false;
-      }
+      // MAKE BUDGET REQUIRED:
+      if (budgetRaw.trim() === "") return false;
+
+      const val = parseBudget(budgetRaw);
+      if (isNaN(val) || !isFinite(val)) return false;
+      if (val < BUDGET_MIN || val > BUDGET_MAX) return false;
+
       if (deadline && deadline < minDeadline) return false;
       return true;
     }
@@ -142,13 +147,34 @@ export default function GetQuoteModal({ open, onClose, onRequested }: Props) {
   };
   const goBack = () => setStep((s) => Math.max(0, s - 1));
 
+  // Map server response to frontend QuotePayload; prefer server id, else fallback to locally-created id
+  const mapServerQuoteToPayload = (
+    serverQuote: any,
+    fallbackId: string
+  ): QuotePayload => {
+    const id = (serverQuote?.id ?? serverQuote?._id ?? fallbackId) as string;
+    return {
+      id: String(id),
+      name: serverQuote?.name ?? fallbackId,
+      email: serverQuote?.email ?? undefined,
+      description: serverQuote?.description ?? undefined,
+      budget:
+        typeof serverQuote?.budget === "number"
+          ? serverQuote.budget
+          : serverQuote?.budget ?? null,
+      deadline: serverQuote?.deadline ?? null,
+      status: (serverQuote?.status as QuoteStatus) ?? "pending",
+      createdAt: serverQuote?.createdAt ?? new Date().toISOString(),
+    };
+  };
+
   const submit = async () => {
-    // ensure final step valid
     if (!validateStep(2)) return;
     setSubmitting(true);
 
-    const payload: QuotePayload = {
-      id: `mock-${Date.now()}`,
+    // local payload used for sending — server will return canonical object
+    const localPayload: QuotePayload = {
+      id: `tmp-${Date.now()}`,
       name: name.trim(),
       email: email.trim() || undefined,
       description: description.trim(),
@@ -159,15 +185,39 @@ export default function GetQuoteModal({ open, onClose, onRequested }: Props) {
     };
 
     try {
-      // *** REPLACE THIS MOCK WITH REAL API CALL ***
-      await new Promise((r) => setTimeout(r, 900));
-      // *** END REPLACE ***
+      const res = await fetch("/api/quote", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(localPayload),
+      });
 
-      await (onRequested ? onRequested(payload) : Promise.resolve());
+      // Network-level failure
+      if (!res.ok) {
+        const errBody = await res.text().catch(() => "");
+        throw new Error(errBody || `Request failed with status ${res.status}`);
+      }
+
+      const data = await res.json().catch(() => null);
+      if (!data) throw new Error("Invalid server response");
+      // Expect server to return { ok: 1, quote: {...} } or { ok: true, quote: {...} }
+      if (!data.ok) {
+        throw new Error(data.message || "Server rejected quote");
+      }
+
+      const serverQuote = data.quote ?? data;
+      const payload = mapServerQuoteToPayload(serverQuote, localPayload.id);
+
+      // Pass the mapped, server-canonical quote to the parent
+      await Promise.resolve(
+        onRequested ? onRequested(payload) : Promise.resolve()
+      );
+
+      // nice UX: reset + close
       setStep(0);
       onClose();
     } catch (err) {
       console.error("Quote request failed", err);
+      // keep it simple for now — replace with toast if you prefer
       alert("Failed to request quote. Try again.");
     } finally {
       setSubmitting(false);
@@ -397,7 +447,7 @@ export default function GetQuoteModal({ open, onClose, onRequested }: Props) {
                   htmlFor="quote-budget"
                   className="block text-sm font-medium text-gray-700"
                 >
-                  Budget (USD, optional)
+                  Budget (USD)
                 </label>
                 <div className="mt-2 relative">
                   <input
@@ -421,6 +471,11 @@ export default function GetQuoteModal({ open, onClose, onRequested }: Props) {
                   </span>
                 </div>
                 <div className="mt-2 text-sm">
+                  {budgetEmpty && (
+                    <div className="text-xs text-red-600">
+                      Budget is required.
+                    </div>
+                  )}
                   {budgetNaN && (
                     <div className="text-xs text-red-600">Invalid number.</div>
                   )}
@@ -473,20 +528,17 @@ export default function GetQuoteModal({ open, onClose, onRequested }: Props) {
                   <div className="mt-2 whitespace-pre-wrap">
                     {description || "—"}
                   </div>
-                  <div className="mt-2 flex gap-3 text-xs">
-                    <div>
-                      {/* Budget:{" "}
-                      <span className="font-medium">
-                        {budgetRaw ? `$${formattedBudget()}` : "Not specified"}
-                      </span> */}
-                    </div>
-                    <div>
-                      {/* Deadline:{" "}
-                      <span className="font-medium">
-                        {deadline || "Not specified"}
-                      </span> */}
-                    </div>
+                  <div className="mt-2 text-xs text-gray-600">
+                    Budget:{" "}
+                    <span className="font-medium">
+                      {budgetRaw.trim() ? `$${formattedBudget()}` : "—"}
+                    </span>
                   </div>
+                  {deadline && (
+                    <div className="mt-1 text-xs text-gray-600">
+                      Deadline: <span className="font-medium">{deadline}</span>
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
