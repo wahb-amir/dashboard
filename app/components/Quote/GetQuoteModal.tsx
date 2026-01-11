@@ -1,19 +1,20 @@
-// components/GetQuoteModal.tsx
 "use client";
 
 import React, { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { X, Clock, Check } from "lucide-react";
 
+export type QuoteStatus = "pending" | "reviewing" | "sent" | "accepted" | "rejected";
+
 export type QuotePayload = {
-  id?: string;
+  id: string;
   name: string;
   email?: string;
-  description: string;
+  description?: string;
   budget?: number | null;
-  deadline?: string | null; // yyyy-mm-dd
-  createdAt?: string;
-  status?: "pending" | "sent" | "accepted" | "rejected";
+  deadline?: string | null;
+  status?: QuoteStatus;
+  createdAt: string;
 };
 
 type Props = {
@@ -22,7 +23,7 @@ type Props = {
   onRequested?: (q: QuotePayload) => Promise<void> | void; // called after success
 };
 
-// Validation constants (tweak if you like)
+// Validation constants
 const DESCRIPTION_MIN = 10;
 const DESCRIPTION_MAX = 2000;
 const BUDGET_MIN = 0;
@@ -65,9 +66,7 @@ export default function GetQuoteModal({ open, onClose, onRequested }: Props) {
       return () => clearTimeout(t);
     } else {
       const t = setTimeout(() => {
-        const el = document.getElementById(
-          "quote-name"
-        ) as HTMLInputElement | null;
+        const el = document.getElementById("quote-name") as HTMLInputElement | null;
         el?.focus();
       }, 120);
       return () => clearTimeout(t);
@@ -109,22 +108,18 @@ export default function GetQuoteModal({ open, onClose, onRequested }: Props) {
     });
   };
 
-  const validEmail = (s: string) =>
-    s.trim() === "" ? true : /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s.trim());
+  const validEmail = (s: string) => (s.trim() === "" ? true : /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s.trim()));
 
   // per-step validation
   const validateStep = (s: number) => {
     if (s === 0) {
-      // contact: name required, email optional but must be valid if present
       return name.trim().length >= 2 && validEmail(email);
     }
     if (s === 1) {
-      // scope: description required within limits
       const len = description.trim().length;
       return len >= DESCRIPTION_MIN && len <= DESCRIPTION_MAX;
     }
     if (s === 2) {
-      // budget/deadline: budget optional but numeric and within limits; deadline optional but >= min
       if (budgetRaw.trim()) {
         const val = parseBudget(budgetRaw);
         if (isNaN(val) || !isFinite(val)) return false;
@@ -142,13 +137,28 @@ export default function GetQuoteModal({ open, onClose, onRequested }: Props) {
   };
   const goBack = () => setStep((s) => Math.max(0, s - 1));
 
+  // Map server response to frontend QuotePayload; prefer server id, else fallback to locally-created id
+  const mapServerQuoteToPayload = (serverQuote: any, fallbackId: string): QuotePayload => {
+    const id = (serverQuote?.id ?? serverQuote?._id ?? fallbackId) as string;
+    return {
+      id: String(id),
+      name: serverQuote?.name ?? fallbackId,
+      email: serverQuote?.email ?? undefined,
+      description: serverQuote?.description ?? undefined,
+      budget: typeof serverQuote?.budget === "number" ? serverQuote.budget : serverQuote?.budget ?? null,
+      deadline: serverQuote?.deadline ?? null,
+      status: (serverQuote?.status as QuoteStatus) ?? "pending",
+      createdAt: serverQuote?.createdAt ?? new Date().toISOString(),
+    };
+  };
+
   const submit = async () => {
-    // ensure final step valid
     if (!validateStep(2)) return;
     setSubmitting(true);
 
-    const payload: QuotePayload = {
-      id: `mock-${Date.now()}`,
+    // local payload used for sending — server will return canonical object
+    const localPayload: QuotePayload = {
+      id: `tmp-${Date.now()}`,
       name: name.trim(),
       email: email.trim() || undefined,
       description: description.trim(),
@@ -159,15 +169,37 @@ export default function GetQuoteModal({ open, onClose, onRequested }: Props) {
     };
 
     try {
-      // *** REPLACE THIS MOCK WITH REAL API CALL ***
-      await new Promise((r) => setTimeout(r, 900));
-      // *** END REPLACE ***
+      const res = await fetch("/api/quote", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(localPayload),
+      });
 
-      await (onRequested ? onRequested(payload) : Promise.resolve());
+      // Network-level failure
+      if (!res.ok) {
+        const errBody = await res.text().catch(() => "");
+        throw new Error(errBody || `Request failed with status ${res.status}`);
+      }
+
+      const data = await res.json().catch(() => null);
+      if (!data) throw new Error("Invalid server response");
+      // Expect server to return { ok: 1, quote: {...} } or { ok: true, quote: {...} }
+      if (!data.ok) {
+        throw new Error(data.message || "Server rejected quote");
+      }
+
+      const serverQuote = data.quote ?? data;
+      const payload = mapServerQuoteToPayload(serverQuote, localPayload.id);
+
+      // Pass the mapped, server-canonical quote to the parent
+      await Promise.resolve(onRequested ? onRequested(payload) : Promise.resolve());
+
+      // nice UX: reset + close
       setStep(0);
       onClose();
     } catch (err) {
       console.error("Quote request failed", err);
+      // keep it simple for now — replace with toast if you prefer
       alert("Failed to request quote. Try again.");
     } finally {
       setSubmitting(false);
@@ -189,57 +221,31 @@ export default function GetQuoteModal({ open, onClose, onRequested }: Props) {
 
   const isValid = validateStep(step);
   const btnDisabled = !isValid || submitting;
-  const primaryBtnClass = submitting
-    ? "bg-blue-600 text-white"
-    : !isValid
-    ? "bg-gray-100 text-gray-400 cursor-not-allowed"
-    : "bg-blue-600 text-white hover:brightness-95";
+  const primaryBtnClass = submitting ? "bg-blue-600 text-white" : !isValid ? "bg-gray-100 text-gray-400 cursor-not-allowed" : "bg-blue-600 text-white hover:brightness-95";
 
   // portal mount target
   const target = typeof document !== "undefined" ? document.body : null;
   if (!target) return null;
 
   return createPortal(
-    <div
-      className="fixed inset-0 flex items-center justify-center px-4 sm:px-6"
-      style={{ zIndex: 99999 }}
-      aria-modal="true"
-      role="dialog"
-      aria-label="Request a quote"
-    >
+    <div className="fixed inset-0 flex items-center justify-center px-4 sm:px-6" style={{ zIndex: 99999 }} aria-modal="true" role="dialog" aria-label="Request a quote">
       {/* backdrop (click to close) */}
-      <div
-        className="absolute inset-0 bg-black/40 backdrop-blur-sm"
-        onClick={onClose}
-      />
+      <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={onClose} />
 
       {/* modal panel */}
-      <div
-        ref={modalRef}
-        onClick={(e) => e.stopPropagation()}
-        role="document"
-        className="relative z-10 w-full max-w-2xl bg-white rounded-2xl shadow-2xl ring-1 ring-black/5 overflow-hidden transform translate-y-0 transition-all duration-200 mx-auto flex flex-col max-h-[90vh]"
-      >
+      <div ref={modalRef} onClick={(e) => e.stopPropagation()} role="document" className="relative z-10 w-full max-w-2xl bg-white rounded-2xl shadow-2xl ring-1 ring-black/5 overflow-hidden transform translate-y-0 transition-all duration-200 mx-auto flex flex-col max-h-[90vh]">
         {/* header */}
         <div className="flex items-center gap-4 px-6 py-4 border-b flex-shrink-0">
           <div className="flex items-center gap-3">
             <div>
-              <div className="text-lg font-semibold text-black">
-                Request a Quote
-              </div>
-              <div className="text-sm text-gray-500">
-                A short 3-step form to get you a price
-              </div>
+              <div className="text-lg font-semibold text-black">Request a Quote</div>
+              <div className="text-sm text-gray-500">A short 3-step form to get you a price</div>
             </div>
           </div>
 
           <div className="ml-auto flex items-center gap-3">
             <div className="text-sm text-gray-500">{step + 1} / 3</div>
-            <button
-              aria-label="Close"
-              onClick={onClose}
-              className="p-2 rounded-md hover:bg-gray-100 transition"
-            >
+            <button aria-label="Close" onClick={onClose} className="p-2 rounded-md hover:bg-gray-100 transition">
               <X size={18} className="text-black" />
             </button>
           </div>
@@ -254,42 +260,17 @@ export default function GetQuoteModal({ open, onClose, onRequested }: Props) {
               return (
                 <div key={label} className="flex-1">
                   <div className="flex items-center gap-3">
-                    <div
-                      className={`flex items-center justify-center w-8 h-8 rounded-full text-sm font-semibold ${
-                        done
-                          ? "bg-green-500 text-white"
-                          : active
-                          ? "bg-blue-600 text-white"
-                          : "bg-gray-100 text-gray-700"
-                      }`}
-                    >
+                    <div className={`flex items-center justify-center w-8 h-8 rounded-full text-sm font-semibold ${done ? "bg-green-500 text-white" : active ? "bg-blue-600 text-white" : "bg-gray-100 text-gray-700"}`}>
                       {done ? <Check size={14} /> : i + 1}
                     </div>
                     <div className="min-w-0">
-                      <div
-                        className={`text-xs font-medium ${
-                          active ? "text-black" : "text-gray-500"
-                        }`}
-                      >
-                        {label}
-                      </div>
+                      <div className={`text-xs font-medium ${active ? "text-black" : "text-gray-500"}`}>{label}</div>
                     </div>
                   </div>
 
                   {i < 2 && (
                     <div className="mt-3 h-1 bg-gray-100 rounded-full">
-                      <div
-                        className={`h-1 rounded-full ${
-                          i < step
-                            ? "bg-green-500"
-                            : active
-                            ? "bg-blue-600"
-                            : "bg-gray-100"
-                        }`}
-                        style={{
-                          width: i < step ? "100%" : active ? "60%" : "4%",
-                        }}
-                      />
+                      <div className={`h-1 rounded-full ${i < step ? "bg-green-500" : active ? "bg-blue-600" : "bg-gray-100"}`} style={{ width: i < step ? "100%" : active ? "60%" : "4%" }} />
                     </div>
                   )}
                 </div>
@@ -304,46 +285,15 @@ export default function GetQuoteModal({ open, onClose, onRequested }: Props) {
           {step === 0 && (
             <div className="space-y-4">
               <div>
-                <label
-                  htmlFor="quote-name"
-                  className="block text-sm font-medium text-gray-700"
-                >
-                  Your name
-                </label>
-                <input
-                  id="quote-name"
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  placeholder="e.g. Jane Doe"
-                  className="mt-2 block w-full rounded-md border px-3 py-2 text-black focus:outline-none focus:ring-2 focus:ring-blue-300"
-                  maxLength={100}
-                />
-                {name.trim().length > 0 && name.trim().length < 2 && (
-                  <div className="mt-1 text-xs text-red-600">
-                    Name must be at least 2 characters.
-                  </div>
-                )}
+                <label htmlFor="quote-name" className="block text-sm font-medium text-gray-700">Your name</label>
+                <input id="quote-name" value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Jane Doe" className="mt-2 block w-full rounded-md border px-3 py-2 text-black focus:outline-none focus:ring-2 focus:ring-blue-300" maxLength={100} />
+                {name.trim().length > 0 && name.trim().length < 2 && <div className="mt-1 text-xs text-red-600">Name must be at least 2 characters.</div>}
               </div>
 
               <div>
-                <label
-                  htmlFor="quote-email"
-                  className="block text-sm font-medium text-gray-700"
-                >
-                  Email (optional)
-                </label>
-                <input
-                  id="quote-email"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  placeholder="you@company.com"
-                  className="mt-2 block w-full rounded-md border px-3 py-2 text-black focus:outline-none focus:ring-2 focus:ring-blue-300"
-                />
-                {!validEmail(email) && (
-                  <div className="mt-1 text-xs text-red-600">
-                    Invalid email address.
-                  </div>
-                )}
+                <label htmlFor="quote-email" className="block text-sm font-medium text-gray-700">Email (optional)</label>
+                <input id="quote-email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@company.com" className="mt-2 block w-full rounded-md border px-3 py-2 text-black focus:outline-none focus:ring-2 focus:ring-blue-300" />
+                {!validEmail(email) && <div className="mt-1 text-xs text-red-600">Invalid email address.</div>}
               </div>
             </div>
           )}
@@ -352,38 +302,14 @@ export default function GetQuoteModal({ open, onClose, onRequested }: Props) {
           {step === 1 && (
             <div className="space-y-4">
               <div>
-                <label
-                  htmlFor="quote-desc"
-                  className="block text-sm font-medium text-gray-700"
-                >
-                  Project description
-                </label>
-                <textarea
-                  id="quote-desc"
-                  ref={descRef}
-                  value={description}
-                  onChange={(e) => setDescription(e.target.value)}
-                  placeholder="Describe the goals, deliverables, timeline, etc."
-                  rows={4}
-                  maxLength={DESCRIPTION_MAX}
-                  className="mt-2 block w-full rounded-md border px-3 py-2 resize-none overflow-y-auto focus:outline-none focus:ring-2 focus:ring-blue-300 text-black h-32"
-                />
+                <label htmlFor="quote-desc" className="block text-sm font-medium text-gray-700">Project description</label>
+                <textarea id="quote-desc" ref={descRef} value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Describe the goals, deliverables, timeline, etc." rows={4} maxLength={DESCRIPTION_MAX} className="mt-2 block w-full rounded-md border px-3 py-2 resize-none overflow-y-auto focus:outline-none focus:ring-2 focus:ring-blue-300 text-black h-32" />
                 <div className="mt-2 flex items-center justify-between text-sm">
                   <div>
-                    {descTooShort && (
-                      <span className="text-xs text-red-600">
-                        Description too short (min {DESCRIPTION_MIN}).
-                      </span>
-                    )}
-                    {descTooLong && (
-                      <span className="text-xs text-red-600">
-                        Description too long (max {DESCRIPTION_MAX}).
-                      </span>
-                    )}
+                    {descTooShort && <span className="text-xs text-red-600">Description too short (min {DESCRIPTION_MIN}).</span>}
+                    {descTooLong && <span className="text-xs text-red-600">Description too long (max {DESCRIPTION_MAX}).</span>}
                   </div>
-                  <div className="text-gray-500">
-                    {description.trim().length}/{DESCRIPTION_MAX}
-                  </div>
+                  <div className="text-gray-500">{description.trim().length}/{DESCRIPTION_MAX}</div>
                 </div>
               </div>
             </div>
@@ -393,73 +319,26 @@ export default function GetQuoteModal({ open, onClose, onRequested }: Props) {
           {step === 2 && (
             <div className="space-y-4">
               <div>
-                <label
-                  htmlFor="quote-budget"
-                  className="block text-sm font-medium text-gray-700"
-                >
-                  Budget (USD, optional)
-                </label>
+                <label htmlFor="quote-budget" className="block text-sm font-medium text-gray-700">Budget (USD, optional)</label>
                 <div className="mt-2 relative">
-                  <input
-                    id="quote-budget"
-                    inputMode="numeric"
-                    value={budgetRaw}
-                    onChange={(e) =>
-                      setBudgetRaw(e.target.value.replace(/[^\d.,]/g, ""))
-                    }
-                    placeholder="e.g. 2,500"
-                    className="block w-full rounded-md border px-3 py-2 pr-12 text-black focus:outline-none focus:ring-2 focus:ring-blue-300"
-                  />
-                  <div className="absolute right-2 top-1/2 -translate-y-1/2 text-sm text-gray-600 px-2">
-                    $
-                  </div>
+                  <input id="quote-budget" inputMode="numeric" value={budgetRaw} onChange={(e) => setBudgetRaw(e.target.value.replace(/[^\d.,]/g, ""))} placeholder="e.g. 2,500" className="block w-full rounded-md border px-3 py-2 pr-12 text-black focus:outline-none focus:ring-2 focus:ring-blue-300" />
+                  <div className="absolute right-2 top-1/2 -translate-y-1/2 text-sm text-gray-600 px-2">$</div>
                 </div>
-                <div className="mt-1 text-xs text-gray-500">
-                  Formatted:{" "}
-                  <span className="font-medium">
-                    {formattedBudget() || "—"}
-                  </span>
-                </div>
+                <div className="mt-1 text-xs text-gray-500">Formatted: <span className="font-medium">{formattedBudget() || "—"}</span></div>
                 <div className="mt-2 text-sm">
-                  {budgetNaN && (
-                    <div className="text-xs text-red-600">Invalid number.</div>
-                  )}
-                  {budgetTooSmall && (
-                    <div className="text-xs text-red-600">
-                      Budget must be at least ${BUDGET_MIN}.
-                    </div>
-                  )}
-                  {budgetTooLarge && (
-                    <div className="text-xs text-red-600">
-                      Budget must be ≤ ${BUDGET_MAX.toLocaleString()}.
-                    </div>
-                  )}
+                  {budgetNaN && <div className="text-xs text-red-600">Invalid number.</div>}
+                  {budgetTooSmall && <div className="text-xs text-red-600">Budget must be at least ${BUDGET_MIN}.</div>}
+                  {budgetTooLarge && <div className="text-xs text-red-600">Budget must be ≤ ${BUDGET_MAX.toLocaleString()}.</div>}
                 </div>
               </div>
 
               <div>
-                <label
-                  htmlFor="quote-deadline"
-                  className="block text-sm font-medium text-gray-700"
-                >
-                  Preferred deadline (optional)
-                </label>
+                <label htmlFor="quote-deadline" className="block text-sm font-medium text-gray-700">Preferred deadline (optional)</label>
                 <div className="mt-2 flex items-center gap-3">
                   <Clock className="text-gray-600" />
-                  <input
-                    id="quote-deadline"
-                    type="date"
-                    min={minDeadline}
-                    value={deadline}
-                    onChange={(e) => setDeadline(e.target.value)}
-                    className="rounded-md border px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-300 text-black"
-                  />
+                  <input id="quote-deadline" type="date" min={minDeadline} value={deadline} onChange={(e) => setDeadline(e.target.value)} className="rounded-md border px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-300 text-black" />
                 </div>
-                {deadline && deadline < minDeadline && (
-                  <div className="mt-1 text-xs text-red-600">
-                    Deadline must be at least 2 days from today.
-                  </div>
-                )}
+                {deadline && deadline < minDeadline && <div className="mt-1 text-xs text-red-600">Deadline must be at least 2 days from today.</div>}
               </div>
 
               {/* Review block */}
@@ -467,26 +346,8 @@ export default function GetQuoteModal({ open, onClose, onRequested }: Props) {
                 <div className="text-sm text-gray-600 mb-2">Review</div>
                 <div className="bg-gray-50 rounded p-3 text-sm text-gray-800 max-h-48 overflow-y-auto">
                   <div className="font-medium">{name || "—"}</div>
-                  {email && (
-                    <div className="text-xs text-gray-600">{email}</div>
-                  )}
-                  <div className="mt-2 whitespace-pre-wrap">
-                    {description || "—"}
-                  </div>
-                  <div className="mt-2 flex gap-3 text-xs">
-                    <div>
-                      {/* Budget:{" "}
-                      <span className="font-medium">
-                        {budgetRaw ? `$${formattedBudget()}` : "Not specified"}
-                      </span> */}
-                    </div>
-                    <div>
-                      {/* Deadline:{" "}
-                      <span className="font-medium">
-                        {deadline || "Not specified"}
-                      </span> */}
-                    </div>
-                  </div>
+                  {email && <div className="text-xs text-gray-600">{email}</div>}
+                  <div className="mt-2 whitespace-pre-wrap">{description || "—"}</div>
                 </div>
               </div>
             </div>
@@ -497,49 +358,19 @@ export default function GetQuoteModal({ open, onClose, onRequested }: Props) {
         <div className="px-6 py-4 border-t flex items-center justify-between gap-3 flex-shrink-0">
           <div className="flex items-center gap-2">
             {step > 0 && (
-              <button
-                onClick={goBack}
-                className="inline-flex items-center gap-2 px-3 py-2 rounded-md bg-gray-100 text-gray-800 hover:bg-gray-200 transition"
-              >
+              <button onClick={goBack} className="inline-flex items-center gap-2 px-3 py-2 rounded-md bg-gray-100 text-gray-800 hover:bg-gray-200 transition">
                 Back
               </button>
             )}
 
-            <button
-              onClick={() => {
-                if (step < 2) goNext();
-                else submit();
-              }}
-              disabled={btnDisabled}
-              className={`inline-flex items-center gap-2 px-4 py-2 rounded-md transition ${primaryBtnClass}`}
-            >
+            <button onClick={() => { if (step < 2) goNext(); else submit(); }} disabled={btnDisabled} className={`inline-flex items-center gap-2 px-4 py-2 rounded-md transition ${primaryBtnClass}`}>
               {submitting && (
-                <svg
-                  className="animate-spin -ml-1 mr-2 h-4 w-4 text-white"
-                  xmlns="http://www.w3.org/2000/svg"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                >
-                  <circle
-                    className="opacity-25"
-                    cx="12"
-                    cy="12"
-                    r="10"
-                    stroke="currentColor"
-                    strokeWidth="4"
-                  />
-                  <path
-                    className="opacity-75"
-                    fill="currentColor"
-                    d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"
-                  />
+                <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
                 </svg>
               )}
-              {step < 2
-                ? "Next"
-                : submitting
-                ? "Requesting..."
-                : "Request Quote"}
+              {step < 2 ? "Next" : submitting ? "Requesting..." : "Request Quote"}
             </button>
           </div>
 
