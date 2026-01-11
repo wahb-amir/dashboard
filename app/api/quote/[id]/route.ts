@@ -10,7 +10,7 @@ export async function DELETE(
   context: { params: Promise<{ id: string }> }
 ) {
   try {
-    const { id } = await context.params; // ✅ FIX HERE
+    const { id } = await context.params; 
 
     if (!id) {
       return NextResponse.json(

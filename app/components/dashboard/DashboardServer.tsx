@@ -11,7 +11,7 @@ interface Props {
 }
 
 // Ensure this matches the Client component exactly
-const PAGE_SIZE = 6;
+const PAGE_SIZE = 5;
 
 export default async function DashboardServer({ user, needsRefresh }: Props) {
   let initialProjects: ProjectFromDB[] = [];
