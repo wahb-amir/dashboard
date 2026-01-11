@@ -17,14 +17,22 @@ const SaveQuote = async (payload: Record<string, any>, refreshDecoded: any) => {
 
   await connectToDatabase();
 
-  const userDoc = await User.findById(String(refreshDecoded.uid)).select("refreshVersion").exec();
+  const userDoc = await User.findById(String(refreshDecoded.uid))
+    .select("refreshVersion")
+    .exec();
   if (!userDoc) {
     return { ok: false, message: "User not found." };
   }
 
   // token revocation check (normalize to numbers if possible)
-  const tokenVersion = typeof refreshDecoded.version === "number" ? refreshDecoded.version : Number(refreshDecoded.version);
-  const userVersion = typeof userDoc.refreshVersion === "number" ? userDoc.refreshVersion : Number(userDoc.refreshVersion);
+  const tokenVersion =
+    typeof refreshDecoded.version === "number"
+      ? refreshDecoded.version
+      : Number(refreshDecoded.version);
+  const userVersion =
+    typeof userDoc.refreshVersion === "number"
+      ? userDoc.refreshVersion
+      : Number(userDoc.refreshVersion);
 
   if (!Number.isNaN(tokenVersion) && userVersion !== tokenVersion) {
     return { ok: false, message: "Session revoked." };
@@ -55,7 +63,8 @@ const SaveQuote = async (payload: Record<string, any>, refreshDecoded: any) => {
     status: "pending",
   });
 
-  const saved = typeof newQuote.toObject === "function" ? newQuote.toObject() : newQuote;
+  const saved =
+    typeof newQuote.toObject === "function" ? newQuote.toObject() : newQuote;
   const { _id, __v, ...rest } = saved;
 
   // Ensure id is always a string
@@ -70,7 +79,9 @@ const SaveQuote = async (payload: Record<string, any>, refreshDecoded: any) => {
 export async function POST(request: Request) {
   try {
     // --- 1. Parse body according to content-type ---
-    const contentType = (request.headers.get("content-type") || "").toLowerCase();
+    const contentType = (
+      request.headers.get("content-type") || ""
+    ).toLowerCase();
 
     let entries: Record<string, any> = {};
 
@@ -78,7 +89,10 @@ export async function POST(request: Request) {
       // JSON body
       entries = (await request.json().catch(() => null)) ?? {};
       if (typeof entries !== "object" || entries === null) {
-        return NextResponse.json({ ok: false, message: "Invalid JSON body." }, { status: 400 });
+        return NextResponse.json(
+          { ok: false, message: "Invalid JSON body." },
+          { status: 400 }
+        );
       }
     } else if (
       contentType.includes("multipart/form-data") ||
@@ -87,29 +101,46 @@ export async function POST(request: Request) {
       const formData = await request.formData();
       entries = Object.fromEntries(formData.entries());
     } else {
-      return NextResponse.json({ ok: false, message: "Unsupported Content-Type" }, { status: 415 });
+      return NextResponse.json(
+        { ok: false, message: "Unsupported Content-Type" },
+        { status: 415 }
+      );
     }
 
     // --- 2. Auth: read cookies defensively ---
-    const authToken = (request as any).cookies?.get?.("authToken")?.value ?? null;
-    const refreshToken = (request as any).cookies?.get?.("refreshToken")?.value ?? null;
+    const authToken =
+      (request as any).cookies?.get?.("authToken")?.value ?? null;
+    const refreshToken =
+      (request as any).cookies?.get?.("refreshToken")?.value ?? null;
 
     if (!refreshToken) {
-      return NextResponse.json({ ok: false, message: "No user auth token provided." }, { status: 401 });
+      return NextResponse.json(
+        { ok: false, message: "No user auth token provided." },
+        { status: 401 }
+      );
     }
 
     const verified = verifyToken(refreshToken, "REFRESH") ?? null;
     const refreshDecoded = verified?.decoded ?? null;
 
     if (!refreshDecoded || !refreshDecoded.uid) {
-      return NextResponse.json({ ok: false, message: "Invalid or expired user auth token." }, { status: 401 });
+      return NextResponse.json(
+        { ok: false, message: "Invalid or expired user auth token." },
+        { status: 401 }
+      );
     }
 
     // --- 3. Save to DB using decoded token ---
     const quoteSaveResult = await SaveQuote(entries, refreshDecoded);
 
     if (!quoteSaveResult.ok) {
-      return NextResponse.json({ ok: false, message: quoteSaveResult.message || "Failed to save quote" }, { status: 400 });
+      return NextResponse.json(
+        {
+          ok: false,
+          message: quoteSaveResult.message || "Failed to save quote",
+        },
+        { status: 400 }
+      );
     }
 
     // --- 4. Build email body using parsed entries ---
@@ -156,7 +187,8 @@ export async function POST(request: Request) {
     return NextResponse.json(
       {
         ok: 0,
-        error: err?.message || "An error occurred while processing your request.",
+        error:
+          err?.message || "An error occurred while processing your request.",
       },
       { status: 500 }
     );
@@ -165,29 +197,77 @@ export async function POST(request: Request) {
 
 export async function GET(request: Request) {
   try {
-    const authToken = (request as any).cookies?.get?.("authToken")?.value ?? null;
-    const refreshToken = (request as any).cookies?.get?.("refreshToken")?.value ?? null;
+    const { decoded: refreshDecoded } =
+      verifyToken(
+        (request as any).cookies?.get?.("refreshToken")?.value ?? "",
+        "REFRESH"
+      ) ?? {};
 
-    if (!refreshToken) {
-      return NextResponse.json({ ok: false, message: "No user auth token provided." }, { status: 401 });
-    }
-
-    const { decoded: refreshDecoded } = verifyToken(refreshToken, "REFRESH") ?? {};
     if (!refreshDecoded || !refreshDecoded.uid) {
-      return NextResponse.json({ ok: false, message: "Invalid or expired user auth token." }, { status: 401 });
+      return NextResponse.json(
+        { ok: false, message: "Invalid or expired user auth token." },
+        { status: 401 }
+      );
     }
 
     await connectToDatabase();
-    const userDoc = await User.findById(String(refreshDecoded.uid)).lean().exec();
+    const userDoc = await User.findById(String(refreshDecoded.uid))
+      .lean()
+      .exec();
     if (!userDoc) {
-      return NextResponse.json({ ok: false, message: "User not found." }, { status: 404 });
+      return NextResponse.json(
+        { ok: false, message: "User not found." },
+        { status: 404 }
+      );
     }
     if (userDoc.refreshVersion !== refreshDecoded.version) {
-      return NextResponse.json({ ok: false, message: "Session revoked" }, { status: 401 });
+      return NextResponse.json(
+        { ok: false, message: "Session revoked" },
+        { status: 401 }
+      );
     }
 
-    const quotes = await Quote.find({ $or: [{ requestedBy: refreshDecoded.uid }, { userId: refreshDecoded.uid }] })
-      .select("name email budget deadline status createdAt")
+    // Read query params
+    const url = new URL(request.url);
+    const statusParam = (url.searchParams.get("status") || "").toLowerCase();
+    const qParam = (url.searchParams.get("q") || "").trim();
+
+    // Build secure base query: only quotes belonging to the user (requestedBy OR userId)
+    const baseAnd: any[] = [
+      {
+        $or: [
+          { requestedBy: refreshDecoded.uid },
+          { userId: refreshDecoded.uid },
+        ],
+      },
+    ];
+
+    // Accept only known statuses — ignore unknown values
+    const allowedStatuses = new Set([
+      "pending",
+      "reviewing",
+      "sent",
+      "accepted",
+      "rejected",
+    ]);
+    if (statusParam && allowedStatuses.has(statusParam)) {
+      baseAnd.push({ status: statusParam });
+    }
+
+    // Search (case-insensitive) across name, email, description
+    if (qParam) {
+      const regex = {
+        $regex: qParam.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"),
+        $options: "i",
+      }; // escape qParam
+      baseAnd.push({
+        $or: [{ name: regex }, { email: regex }, { description: regex }],
+      });
+    }
+
+    const query = baseAnd.length === 1 ? baseAnd[0] : { $and: baseAnd };
+
+    const quotes = await Quote.find(query)
       .sort({ createdAt: -1 })
       .lean()
       .exec();
@@ -195,6 +275,9 @@ export async function GET(request: Request) {
     return NextResponse.json({ ok: true, quotes });
   } catch (err) {
     console.error("❌ Error fetching quotes:", err);
-    return NextResponse.json({ ok: false, message: "Failed to fetch quotes." }, { status: 500 });
+    return NextResponse.json(
+      { ok: false, message: "Failed to fetch quotes." },
+      { status: 500 }
+    );
   }
 }
