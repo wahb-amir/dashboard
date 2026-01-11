@@ -79,104 +79,70 @@ const SaveQuote = async (payload: Record<string, any>, refreshDecoded: any) => {
 export async function POST(request: Request) {
   try {
     // --- 1. Parse body according to content-type ---
-    const contentType = (
-      request.headers.get("content-type") || ""
-    ).toLowerCase();
+    const contentType = (request.headers.get("content-type") || "").toLowerCase();
 
+    // single mutable entries object for both branches
     let entries: Record<string, any> = {};
 
     if (contentType.includes("application/json")) {
       // JSON body
       entries = (await request.json().catch(() => null)) ?? {};
       if (typeof entries !== "object" || entries === null) {
-        return NextResponse.json(
-          { ok: false, message: "Invalid JSON body." },
-          { status: 400 }
-        );
+        return NextResponse.json({ ok: false, message: "Invalid JSON body." }, { status: 400 });
       }
-    } else if (
-      contentType.includes("multipart/form-data") ||
-      contentType.includes("application/x-www-form-urlencoded")
-    ) {
+    } else if (contentType.includes("multipart/form-data") || contentType.includes("application/x-www-form-urlencoded")) {
+      // Form data (defensive)
       const formData = await request.formData();
+      // Object.fromEntries is fine here — we will still validate fields below
       entries = Object.fromEntries(formData.entries());
     } else {
-      return NextResponse.json(
-        { ok: false, message: "Unsupported Content-Type" },
-        { status: 415 }
-      );
+      return NextResponse.json({ ok: false, message: "Unsupported Content-Type" }, { status: 415 });
     }
 
     // --- 2. Auth: read cookies defensively ---
-    const authToken =
-      (request as any).cookies?.get?.("authToken")?.value ?? null;
-    const refreshToken =
-      (request as any).cookies?.get?.("refreshToken")?.value ?? null;
-
+    const refreshToken = (request as any).cookies?.get?.("refreshToken")?.value ?? null;
     if (!refreshToken) {
-      return NextResponse.json(
-        { ok: false, message: "No user auth token provided." },
-        { status: 401 }
-      );
+      return NextResponse.json({ ok: false, message: "No user auth token provided." }, { status: 401 });
     }
 
     const verified = verifyToken(refreshToken, "REFRESH") ?? null;
     const refreshDecoded = verified?.decoded ?? null;
 
     if (!refreshDecoded || !refreshDecoded.uid) {
-      return NextResponse.json(
-        { ok: false, message: "Invalid or expired user auth token." },
-        { status: 401 }
-      );
+      return NextResponse.json({ ok: false, message: "Invalid or expired user auth token." }, { status: 401 });
     }
 
-    // --- 3. Save to DB using decoded token ---
+    // --- 2.5 Normalize / resolve email ---
+    // If client provided an email (non-empty string) -> use it.
+    // Otherwise, fetch from user doc and use that.
+    let emailFromRequest: string | null = null;
+    if (typeof entries.email === "string" && entries.email.trim() !== "") {
+      emailFromRequest = entries.email.trim();
+    }
+
+    if (!emailFromRequest) {
+      // fetch the user's email from DB (fallback)
+      await connectToDatabase();
+      const userDoc = await User.findById(String(refreshDecoded.uid)).select("email").lean().exec();
+      emailFromRequest = userDoc?.email ?? null;
+    }
+
+    // If you require an email at all times, error out here. Otherwise entries.email will be null.
+    if (!emailFromRequest) {
+      return NextResponse.json({ ok: false, message: "Email is required (either in request or on user profile)." }, { status: 400 });
+    }
+
+    // Put normalized email back into entries so SaveQuote receives it
+    entries.email = emailFromRequest;
+
+    // --- 3. Save to DB using decoded token (SaveQuote will still perform its own safety checks) ---
     const quoteSaveResult = await SaveQuote(entries, refreshDecoded);
 
     if (!quoteSaveResult.ok) {
-      return NextResponse.json(
-        {
-          ok: false,
-          message: quoteSaveResult.message || "Failed to save quote",
-        },
-        { status: 400 }
-      );
+      return NextResponse.json({ ok: false, message: quoteSaveResult.message || "Failed to save quote" }, { status: 400 });
     }
 
-    // --- 4. Build email body using parsed entries ---
-    // const htmlBody = `
-    //   <div style="font-family: sans-serif; padding:20px; border:1px solid #eee; border-radius:10px;">
-    //     <h2 style="color:#2563eb;">📋 New Quote Request Received</h2>
-    //     <p>A user has submitted a new quote request via the dashboard.</p>
-    //     <hr />
-    //     <p><b>Project:</b> ${entries.projectTitle || entries.name || "—"}</p>
-    //     <p><b>Client:</b> ${entries.contactName || entries.name || "—"} (${entries.email || "—"})</p>
-    //     <p><b>Budget:</b> ${entries.budget ?? "—"}</p>
-    //     <p><b>Deadline:</b> ${entries.deadline || "—"}</p>
-    //     <div style="background:#f9fafb; padding:15px; border-radius:5px;">
-    //       <b>Project Details:</b><br/>
-    //       <p>${entries.details || entries.description || "—"}</p>
-    //     </div>
-    //   </div>
-    // `;
-
-    // --- 5. Send email (nodemailer) ---
-    // const transporter = nodemailer.createTransport({
-    //   service: "gmail",
-    //   auth: {
-    //     user: process.env.MAIL_USER,
-    //     pass: process.env.MAIL_PASS,
-    //   },
-    // });
-
-    // await transporter.sendMail({
-    //   from: process.env.MAIL_USER,
-    //   to: process.env.ADMIN_EMAIL,
-    //   subject: `📋 New Quote Request: ${entries.projectTitle || entries.name || "Untitled"}`,
-    //   html: htmlBody,
-    // });
-
-    // --- 6. Final response ---
+    // --- 4. Final response ---
     return NextResponse.json({
       ok: 1,
       message: "Quote sent and saved successfully!",
@@ -184,16 +150,13 @@ export async function POST(request: Request) {
     });
   } catch (err: any) {
     console.error("❌ Final Route Error:", err);
-    return NextResponse.json(
-      {
-        ok: 0,
-        error:
-          err?.message || "An error occurred while processing your request.",
-      },
-      { status: 500 }
-    );
+    return NextResponse.json({
+      ok: 0,
+      error: err?.message || "An error occurred while processing your request.",
+    }, { status: 500 });
   }
 }
+
 
 export async function GET(request: Request) {
   try {

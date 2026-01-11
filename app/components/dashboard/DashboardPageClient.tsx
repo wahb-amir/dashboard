@@ -33,6 +33,44 @@ interface Props {
 // MATCHED SERVER CONSTANT
 const PAGE_SIZE = 6;
 
+/* ---------------------------
+   Small Skeleton components
+   --------------------------- */
+function SkeletonHeader() {
+  return (
+    <div className="w-full max-w-7xl mx-auto flex items-center justify-between gap-4 pb-2">
+      <div className="skeleton h-8 w-64 rounded-md" />
+      <div className="flex items-center gap-3">
+        <div className="skeleton h-10 w-40 rounded-md" />
+        <div className="skeleton h-10 w-36 rounded-md" />
+      </div>
+    </div>
+  );
+}
+
+function SkeletonSidebarBlock({ height = 48 }: { height?: number }) {
+  return <div className="bg-white rounded-lg shadow-sm border p-4" style={{ height }}><div className="skeleton h-full w-full rounded" /></div>;
+}
+
+function SkeletonProjectCard() {
+  return (
+    <div className="bg-white rounded shadow border p-4 flex gap-4 items-start">
+      <div className="skeleton h-12 w-12 rounded-md flex-shrink-0" />
+      <div className="flex-1 min-w-0">
+        <div className="skeleton h-4 w-1/3 rounded mb-2" />
+        <div className="skeleton h-3 w-1/2 rounded mb-3" />
+        <div className="flex gap-2">
+          <div className="skeleton h-8 w-24 rounded" />
+          <div className="skeleton h-8 w-20 rounded" />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ---------------------------
+   Dashboard Component
+   --------------------------- */
 export default function DashboardPageClient({
   initialUser = null,
   initialProjects = [],
@@ -371,24 +409,36 @@ export default function DashboardPageClient({
     );
   }
 
-  // Skeleton UI
+  // Skeleton UI — improved shimmer style
   if (!currentUser && !failed) {
     return (
       <div className="min-h-screen flex flex-col bg-gray-50">
-        <header className="px-4 py-3 border-b bg-white animate-pulse">
-          <div className="max-w-7xl mx-auto h-12 bg-gray-200 rounded" />
+        {/* Inject skeleton CSS (shimmer) */}
+        <style>{`
+          .skeleton {
+            background: linear-gradient(90deg, #f3f4f6 0%, #e6e8eb 50%, #f3f4f6 100%);
+            background-size: 200% 100%;
+            animation: shimmer 1.2s linear infinite;
+          }
+          @keyframes shimmer {
+            0% { background-position: -200% 0; }
+            100% { background-position: 200% 0; }
+          }
+        `}</style>
+
+        <header className="px-4 py-3 border-b bg-white">
+          <SkeletonHeader />
         </header>
         <main className="flex-1 max-w-7xl mx-auto px-4 py-6 w-full grid grid-cols-1 lg:grid-cols-3 gap-6">
           <aside className="order-first lg:order-last space-y-4">
-            <div className="bg-white rounded-lg shadow-sm border p-4 h-48 animate-pulse" />
-            <div className="bg-white rounded-lg shadow-sm border p-4 h-48 animate-pulse" />
+            <SkeletonSidebarBlock height={192} />
+            <SkeletonSidebarBlock height={192} />
           </aside>
           <section className="lg:col-span-2 space-y-4">
             {Array.from({ length: PAGE_SIZE }).map((_, i) => (
-              <div
-                key={i}
-                className="h-40 bg-white rounded shadow animate-pulse"
-              />
+              <div key={i}>
+                <SkeletonProjectCard />
+              </div>
             ))}
           </section>
         </main>
@@ -398,6 +448,19 @@ export default function DashboardPageClient({
 
   return (
     <div className="min-h-screen flex flex-col bg-gray-50">
+      {/* inject skeleton CSS so project-list shimmer works when loading */}
+      <style>{`
+        .skeleton {
+          background: linear-gradient(90deg, #f3f4f6 0%, #e6e8eb 50%, #f3f4f6 100%);
+          background-size: 200% 100%;
+          animation: shimmer 1.2s linear infinite;
+        }
+        @keyframes shimmer {
+          0% { background-position: -200% 0; }
+          100% { background-position: 200% 0; }
+        }
+      `}</style>
+
       <header className="px-4 py-3 border-b bg-white">
         <div className="max-w-7xl mx-auto flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-2">
           <div>
@@ -478,7 +541,14 @@ export default function DashboardPageClient({
               </div>
             )}
 
-            {displayed.length === 0 && !projectsLoading ? (
+            {projectsLoading && displayed.length === 0 ? (
+              // show skeletons while fetching first page
+              <>
+                {Array.from({ length: PAGE_SIZE }).map((_, i) => (
+                  <SkeletonProjectCard key={i} />
+                ))}
+              </>
+            ) : displayed.length === 0 && !projectsLoading ? (
               <div className="text-center py-10 text-gray-500">
                 No projects found.
               </div>
