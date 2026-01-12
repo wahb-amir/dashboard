@@ -4,8 +4,7 @@ import React, { useState, useEffect } from "react";
 import { createPortal } from "react-dom";
 import { QuotePayload } from "../Quote/GetQuoteModal";
 import { X, Loader2 } from "lucide-react";
-import toast from "react-hot-toast";
-
+import toast,{Toaster} from "react-hot-toast";
 interface ConvertQuoteModalProps {
   open: boolean;
   onClose: () => void;
@@ -26,7 +25,7 @@ export default function ConvertToProject({
   const [description, setDescription] = useState("");
   const [saving, setSaving] = useState(false);
   const [mounted, setMounted] = useState(false);
-
+  
   // 1. Handle SSR: Ensure we only access document after mount
   useEffect(() => {
     setMounted(true);
@@ -67,55 +66,65 @@ export default function ConvertToProject({
   // Don't render if not open, no quote, or not yet mounted (SSR safety)
   if (!open || !quote || !mounted) return null;
 
-  const handleSave = async () => {
-    if (!name.trim()) {
-      toast.error("Name is required");
+const handleSave = async () => {
+  if (!name.trim()) {
+    toast.error("Name is required");
+    return;
+  }
+  if (!email.trim()) {
+    toast.error("Email is required");
+    return;
+  }
+
+  setSaving(true);
+
+  // Show loading toast and keep its ID
+  const loadingToastId = toast.loading("Converting quote to project...");
+
+  try {
+    const res = await fetch("/api/project", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name: name.trim(),
+        email: email.trim(),
+        budget: budget === "" ? null : Number(budget),
+        deadline: deadline || null,
+        description: description.trim(),
+        sourceQuoteId: quote.id,
+        cvtProject: true,
+      }),
+    });
+
+    const data = await res.json().catch(() => ({}));
+
+    if (!res.ok || !data.ok) {
+      toast.dismiss(loadingToastId); // dismiss the loading toast
+      toast.error(data.message || "Failed to convert quote");
       return;
     }
-    if (!email.trim()) {
-      toast.error("Email is required");
-      return;
-    }
 
-    setSaving(true);
+    toast.success("Quote converted to project successfully!", { id: loadingToastId }); // replaces the loading toast
+    onConfirmed(data.project || {});
+    onClose();
+     setTimeout(() => {
+      window.location.reload();
+    }, 200);
+  } catch (err: any) {
+    toast.dismiss(loadingToastId); // make sure loading toast is gone
+    toast.error("An unexpected error occurred");
+    console.error("ConvertToProject error:", err);
+  } finally {
+    setSaving(false);
+  }
+};
 
-    try {
-      const res = await fetch("/api/project", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          name: name.trim(),
-          email: email.trim(),
-          budget: budget === "" ? null : Number(budget),
-          deadline: deadline || null,
-          description: description.trim(),
-          sourceQuoteId: quote.id,
-          cvtProject: true,
-        }),
-      });
-
-      const data = await res.json().catch(() => ({}));
-
-      if (!res.ok || !data.ok) {
-        toast.error(data.message || "Failed to convert quote");
-        return;
-      }
-
-      toast.success("Quote converted to project successfully!");
-      onConfirmed(data.project || {});
-      onClose();
-    } catch (err: any) {
-      console.error("ConvertToProject error:", err);
-      toast.error("Network error while converting quote");
-    } finally {
-      setSaving(false);
-    }
-  };
 
   // 3. Render via Portal
   return createPortal(
     <div className="fixed inset-0 z-9999 flex items-center justify-center bg-black/60 backdrop-blur-sm transition-all duration-300">
       {/* Backdrop click to close */}
+      <Toaster position="top-right" reverseOrder={false} />
       <div className="absolute inset-0" onClick={onClose} />
 
       <div className="relative w-[95%] sm:w-full max-w-lg max-h-[90vh] overflow-y-auto bg-white rounded-xl shadow-2xl p-6 md:p-8 animate-in fade-in zoom-in-95 duration-200">
