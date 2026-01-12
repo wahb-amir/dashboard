@@ -4,7 +4,16 @@ import React, { useEffect, useState, useCallback } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import type { LucideIcon } from "lucide-react";
-import { Home, Grid, MessageSquare, FileText, Users, X } from "lucide-react";
+import {
+  Home,
+  Grid,
+  MessageSquare,
+  FileText,
+  Users,
+  X,
+  Settings,
+} from "lucide-react";
+import { useRouter } from "next/navigation";
 
 type NavItem = {
   name: string;
@@ -15,6 +24,7 @@ type NavItem = {
 const NAV_ITEMS: NavItem[] = [
   { name: "Home", href: "/dashboard", Icon: Home },
   { name: "Projects", href: "/dashboard/projects", Icon: Grid },
+  { name: "Messages", href: "/dashboard/messages", Icon: MessageSquare },
   { name: "Quotes", href: "/dashboard/quotes", Icon: FileText },
   { name: "Team", href: "/dashboard/team", Icon: Users },
 ];
@@ -58,7 +68,7 @@ export default function Sidebar({
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [onKey]);
-
+  const router = useRouter();
   return (
     <>
       {/* Desktop sidebar (shown at >=880px via CSS below) */}
@@ -100,21 +110,23 @@ export default function Sidebar({
           </ul>
         </nav>
 
-        <div className="p-4 border-t">
-          <Link
-            href="/settings"
-            className="text-sm text-black hover:text-black"
-            onClick={() => setOpen(false)}
+        <div className="p-4 border-t text-black">
+          <button
+            className="cursor-pointer text-sm hover:text-black font-medium"
+            onClick={() => router.push("/dashboard/settings")}
           >
+            <Settings className="inline-block mr-2 text-black" size={16} />
             Settings
-          </Link>
+          </button>
         </div>
       </aside>
 
       {/* Mobile backdrop (visible <880px when open) */}
       <div
         className={`bp-mobile-backdrop fixed inset-0 z-40 md:hidden transition-opacity duration-200 ${
-          open ? "opacity-100 pointer-events-auto" : "opacity-0 pointer-events-none"
+          open
+            ? "opacity-100 pointer-events-auto"
+            : "opacity-0 pointer-events-none"
         }`}
         aria-hidden={!open}
       >
@@ -137,7 +149,11 @@ export default function Sidebar({
         onTouchStart={(e) => e.stopPropagation()}
       >
         <div className="h-16 flex items-center px-4 border-b">
-          <Link href="/" className="text-lg font-bold text-black" onClick={() => setOpen(false)}>
+          <Link
+            href="/"
+            className="text-lg font-bold text-black"
+            onClick={() => setOpen(false)}
+          >
             Projects
           </Link>
 
@@ -150,17 +166,23 @@ export default function Sidebar({
           </button>
         </div>
 
-        <nav className="px-2 py-4 overflow-y-auto" aria-label="Mobile navigation">
+        <nav
+          className="px-2 py-4 overflow-y-auto"
+          aria-label="Mobile navigation"
+        >
           <ul className="space-y-1">
             {NAV_ITEMS.map((it) => {
-              const active = pathname === it.href || pathname.startsWith(it.href + "/");
+              const active =
+                pathname === it.href || pathname.startsWith(it.href + "/");
               return (
                 <li key={it.href}>
                   <Link
                     href={it.href}
                     onClick={() => setOpen(false)}
                     className={`flex items-center gap-3 w-full px-3 py-2 rounded-md transition ${
-                      active ? "bg-blue-50 font-semibold text-black" : "text-black hover:bg-gray-100"
+                      active
+                        ? "bg-blue-50 font-semibold text-black"
+                        : "text-black hover:bg-gray-100"
                     }`}
                   >
                     <it.Icon className="text-black" size={18} />
@@ -172,10 +194,14 @@ export default function Sidebar({
           </ul>
         </nav>
 
-        <div className="p-4 border-t">
-          <Link href="/settings" className="text-sm text-black hover:text-black" onClick={() => setOpen(false)}>
+        <div className="p-4 border-t text-black">
+          <button
+            className="cursor-pointer text-sm hover:text-black font-medium"
+            onClick={() => router.push("/dashboard/settings")}
+          >
+            <Settings className="inline-block mr-2 text-black" size={16} />
             Settings
-          </Link>
+          </button>
         </div>
       </div>
 
