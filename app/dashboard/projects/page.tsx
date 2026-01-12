@@ -330,7 +330,10 @@ export default function DashboardProjectsPage({
 
           <div className="flex items-center gap-2 actions">
             <button
-              onClick={() => setQuoteOpen(true)}
+              onClick={() => {
+                setQuoteOpen(true);
+                window.scrollTo(0, 0);
+              }}
               className="inline-flex items-center gap-2 px-2 py-1.5 rounded-md border bg-transparent hover:bg-gray-50 text-black text-sm whitespace-nowrap"
             >
               Request Quote

@@ -3,6 +3,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { X, Clock, Check } from "lucide-react";
+import { useRouter } from "next/navigation";
 
 export type QuoteStatus =
   | "pending"
@@ -56,7 +57,7 @@ export default function GetQuoteModal({ open, onClose, onRequested }: Props) {
     return `${yyyy}-${mm}-${dd}`;
   };
   const minDeadline = getMinDate();
-
+const router = useRouter();
   // reset when modal closed / focus when opened
   useEffect(() => {
     if (!open) {
@@ -216,6 +217,9 @@ export default function GetQuoteModal({ open, onClose, onRequested }: Props) {
       // nice UX: reset + close
       setStep(0);
       onClose();
+      setTimeout(() => {
+        router.push('/dashboard/quotes');
+      }, 300);
     } catch (err) {
       console.error("Quote request failed", err);
       // keep it simple for now — replace with toast if you prefer
