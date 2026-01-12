@@ -1,10 +1,10 @@
-// app/models/User.ts
 import mongoose, { Document, Model, Schema } from "mongoose";
 import { hashPassword } from "@/app/utils/hash";
 
 export interface IUser extends Document {
   name: string;
-  email: string;
+  email: string;         // login email
+  contactEmail?: string; // separate contact email
   password: string;
   company?: string;
   role: string;
@@ -30,6 +30,19 @@ const UserSchema = new Schema<IUser>(
       trim: true,
       index: true,
     },
+   contactEmail: {
+  type: String,
+  required: false,
+  lowercase: true,
+  trim: true,
+  default: "",
+  validate: {
+    validator: function (v: string) {
+      return v === "" || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v);
+    },
+    message: "Invalid email",
+  },
+},
     password: {
       type: String,
       required: true,
