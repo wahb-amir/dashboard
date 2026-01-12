@@ -20,6 +20,7 @@ export type QuotePayload = {
   deadline?: string | null;
   status?: QuoteStatus;
   createdAt: string;
+  cvtProject?: boolean;
 };
 
 type Props = {
