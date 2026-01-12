@@ -7,7 +7,7 @@ import Project from "@/app/models/Projects";
 import User from "@/app/models/User";
 import mongoose from "mongoose";
 import { v4 as uuidv4 } from "uuid";
-
+import Quote from "@/app/models/Quote";
 /**
  * Keep the allowed statuses and the StepStatus type at the top so everything
  * that uses StepStatus has it available (no duplicate declarations).
@@ -107,6 +107,7 @@ export async function validateAndFetchUser(
 
       // Connect DB and fetch user once
       await connectToDatabase();
+
       const user = await User.findById(uid)
         .select("name email company refreshVersion")
         .lean()
@@ -436,8 +437,44 @@ export async function POST(request: Request) {
         },
       ],
     };
+    const cvtProjectFlag = (bodyRaw as any).cvtProject;
+    const sourceQuoteId = (bodyRaw as any).sourceQuoteId;
 
-    const created = await Project.create(projectData as any);
+    async function updateQuoteWithRetry(
+      quoteId: string,
+      retries = 3,
+      delayMs = 200
+    ): Promise<void> {
+      for (let attempt = 1; attempt <= retries; attempt++) {
+        try {
+          await Quote.findByIdAndUpdate(quoteId, { cvtProject: true }).exec();
+          return; // success
+        } catch (err) {
+          console.warn(
+            `Attempt ${attempt} failed to update quote ${quoteId}:`,
+            err
+          );
+          if (attempt < retries) {
+            // wait before retrying
+            await new Promise((res) => setTimeout(res, delayMs));
+          } else {
+            console.error(
+              `Failed to update quote ${quoteId} after ${retries} attempts`
+            );
+          }
+        }
+      }
+    }
+
+    // Build an array of async tasks
+    const tasks: Promise<any>[] = [Project.create(projectData as any)];
+
+    if (cvtProjectFlag === true && typeof sourceQuoteId === "string") {
+      tasks.push(updateQuoteWithRetry(sourceQuoteId, 3, 200));
+    }
+
+    // Run in parallel
+    const [created] = await Promise.all(tasks); // created is the Project
 
     const raw =
       typeof created.toObject === "function"

@@ -13,6 +13,8 @@ const QuoteSchema = new Schema(
       enum: ["pending", "reviewing", "sent", "accepted", "rejected"],
       default: "pending",
     },
+    //convert to project field
+    cvtProject:{type:Boolean,default:false},
   },
   { timestamps: true }
 );

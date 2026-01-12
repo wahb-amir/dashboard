@@ -2,10 +2,9 @@
 
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import toast from "react-hot-toast";
+import ConvertToProject from "@/app/components/Projects/ConvertToProject";
 import DeleteQuoteModal from "@/app/components/Quote/DeleteQuoteModal";
-import GetQuoteModal, {
-  QuotePayload,
-} from "@/app/components/Quote/GetQuoteModal";
+import GetQuoteModal from "@/app/components/Quote/GetQuoteModal";
 import { ChevronDown, ChevronRight, FileText, Search } from "lucide-react";
 import { QuoteStatus } from "@/app/components/Quote/GetQuoteModal";
 /** --- Types --- **/
@@ -21,6 +20,19 @@ type ServerQuote = {
   status?: "pending" | "reviewing" | "sent" | "accepted" | "rejected";
   createdAt?: string;
   updatedAt?: string;
+  cvtProject?: boolean;
+};
+
+type QuotePayload = {
+  id: string;
+  name: string;
+  email?: string;
+  description: string;
+  budget: number | null;
+  deadline: string | null;
+  status: QuoteStatus;
+  createdAt: string;
+  cvtProject: boolean;
 };
 
 const mapServerQuoteToPayload = (q: ServerQuote): QuotePayload => {
@@ -37,6 +49,7 @@ const mapServerQuoteToPayload = (q: ServerQuote): QuotePayload => {
     deadline: q.deadline ?? null,
     status: q.status ?? "pending",
     createdAt: q.createdAt ?? new Date().toISOString(),
+     cvtProject: q.cvtProject ?? false,
   };
 };
 
@@ -83,6 +96,15 @@ export default function QuotePage() {
 
   const toggleExpand = (id: string) => {
     setExpandedId((prev) => (prev === id ? null : id));
+  };
+
+  const [convertModalOpen, setConvertModalOpen] = useState(false);
+  const [selectedQuote, setSelectedQuote] = useState<QuotePayload | null>(null);
+
+  const handleConvert = (quote: QuotePayload) => {
+    // Your conversion logic here, e.g., call API
+    console.log("Converting quote to project:", quote);
+    setConvertModalOpen(false);
   };
 
   const fetchQuotes = useCallback(async () => {
@@ -215,7 +237,8 @@ export default function QuotePage() {
       }
 
       if (!res.ok) {
-        const errMsg = data?.message || `Request failed with status ${res.status}`;
+        const errMsg =
+          data?.message || `Request failed with status ${res.status}`;
         toast.error(errMsg);
         return;
       }
@@ -409,20 +432,39 @@ export default function QuotePage() {
                   </div>
 
                   {/* Actions Bar inside Accordion */}
-                  <div className="mt-4 pt-3 border-t flex justify-end gap-2">
-                    <button
-                      className="px-3 py-1 text-xs border bg-white rounded hover:bg-gray-50 text-gray-600"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setDeleteId(q.id); // open confirm modal
-                      }}
-                    >
-                      Delete
-                    </button>
-                    <button className="px-3 py-1 text-xs bg-blue-600 text-white rounded hover:bg-blue-700">
-                      Convert to Project
-                    </button>
-                  </div>
+                <div className="mt-4 pt-3 border-t flex justify-end gap-2">
+  <button
+    className="px-3 py-1 text-xs border bg-white rounded hover:bg-gray-50 text-gray-600"
+    onClick={(e) => {
+      e.stopPropagation();
+      setDeleteId(q.id); // open confirm modal
+    }}
+  >
+    Delete
+  </button>
+
+{!q.cvtProject && (
+  <button
+    className="px-3 py-1 text-xs bg-blue-600 text-white rounded hover:bg-blue-700"
+    onClick={() => {
+      setSelectedQuote(q);
+      setConvertModalOpen(true);
+    }}
+  >
+    Convert to Project
+  </button>
+)}
+</div>
+
+{selectedQuote && !selectedQuote.cvtProject && (
+  <ConvertToProject
+    open={convertModalOpen}
+    onClose={() => setConvertModalOpen(false)}
+    quote={selectedQuote}
+    onConfirmed={handleConvert}
+  />
+)}
+
                 </div>
               )}
             </div>
@@ -436,7 +478,6 @@ export default function QuotePage() {
         onRequested={onRequested}
       />
 
-      {/* Delete confirmation modal */}
       <DeleteQuoteModal
         open={!!deleteId}
         loading={deletingId === deleteId}
