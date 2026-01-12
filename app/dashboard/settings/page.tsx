@@ -3,10 +3,10 @@ import React, { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import toast, { Toaster } from 'react-hot-toast';
 
-import AccountSection from '@/app/components/AccountSection';
-import DevicesSection, { Device } from '@/app/components/DevicesSection';
-import SessionSection from '@/app/components/SessionSection';
-import VerifyModal from '@/app/components/VerifyModal';
+import AccountSection from '@/app/components/Settings/AccountSection';
+import DevicesSection, { Device } from '@/app/components/Settings/DevicesSection';
+import SessionSection from '@/app/components/Settings/SessionSection';
+import VerifyModal from '@/app/components/Settings/VerifyModal';
 
 const SettingsPage: React.FC = () => {
   const router = useRouter();
