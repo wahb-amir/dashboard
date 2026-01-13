@@ -8,6 +8,9 @@ importers:
 
   .:
     dependencies:
+      "\e[200~nodemailer~":
+        specifier: "link:@type/\e[200~nodemailer~"
+        version: "link:@type/\e[200~nodemailer~"
       '@types/nodemailer':
         specifier: ^7.0.4
         version: 7.0.4
