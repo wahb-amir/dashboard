@@ -42,14 +42,9 @@ export default function VerifyModal({
   const [confirmPassword, setConfirmPassword] = useState("");
   const [loading, setLoading] = useState(false);
 
-  // inputs
-  const [enteredEmail, setEnteredEmail] = useState("");
-  const [updatedEmail, setUpdatedEmail] = useState("");
   // pending info (may come from a previous flow or from userinfo)
   const [pendingEmail, setPendingEmail] = useState<string | null>(null); // raw pending email if provided by API
-  const [pendingEmailMasked, setPendingEmailMasked] = useState<string | null>(
-    null
-  );
+  const [pendingEmailMasked, setPendingEmailMasked] = useState<string | null>(null);
   const [fetchingUserInfo, setFetchingUserInfo] = useState(false);
   const [resendLoading, setResendLoading] = useState(false);
 
@@ -84,8 +79,6 @@ export default function VerifyModal({
       setStep("send-code");
       setCode("");
       setConfirmPassword("");
-      setEnteredEmail("");
-      setUpdatedEmail("");
       setPendingEmail(null);
       setPendingEmailMasked(null);
       setLoading(false);
@@ -102,8 +95,7 @@ export default function VerifyModal({
     const visible = 2;
     const visibleLocal = local.slice(0, Math.max(0, visible));
     const maskedLocal =
-      visibleLocal +
-      "*".repeat(Math.max(0, local.length - visibleLocal.length));
+      visibleLocal + "*".repeat(Math.max(0, local.length - visibleLocal.length));
     return `${maskedLocal}@${domain}`;
   };
 
@@ -141,9 +133,9 @@ export default function VerifyModal({
 
   // Step 1: POST to send verification code
   const sendVerification = async () => {
-    const emailToUse = userEmail?.trim() || enteredEmail.trim();
+    const emailToUse = userEmail?.trim() || "";
     if (!emailToUse) {
-      toast.error("Please enter an email to send the verification code to.");
+      toast.error("No client contact email available to send the code to.");
       return;
     }
 
@@ -167,9 +159,7 @@ export default function VerifyModal({
         return;
       }
 
-      toast.success(
-        `Verification code sent to ${maskEmail(emailToUse)}. Check your inbox.`
-      );
+      toast.success(`Verification code sent to ${maskEmail(emailToUse)}. Check your inbox.`);
       setStep("enter-code");
     } catch (err) {
       console.error("sendVerification error:", err);
@@ -201,7 +191,7 @@ export default function VerifyModal({
         credentials: "include",
         body: JSON.stringify({
           code: code.trim(),
-          email: userEmail?.trim() || enteredEmail.trim(),
+          email: userEmail?.trim() || "",
           currentPassword: currentPassword.trim(),
           action: verifyForAction,
         }),
@@ -234,23 +224,17 @@ export default function VerifyModal({
     }
   };
 
-  // Step 3: create pending contact email
+  // Step 3: create pending contact email (now only supports using the client email)
   const handleUpdateContact = async (emailParam?: string) => {
-    // prefer emailParam, then updatedEmail (user typed), then enteredEmail (from earlier)
-    const emailToUpdate = (
-      emailParam ||
-      updatedEmail ||
-      enteredEmail ||
-      ""
-    ).trim();
+    const emailToUpdate = (emailParam || "").trim();
     if (!emailToUpdate) {
-      toast.error("Please provide the email to update.");
+      toast.error("No contact email available to set as pending.");
       return;
     }
 
     const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     if (!emailPattern.test(emailToUpdate)) {
-      toast.error("Please enter a valid email address.");
+      toast.error("Client contact email seems invalid.");
       return;
     }
 
@@ -277,16 +261,13 @@ export default function VerifyModal({
       }
 
       const masked =
-        (data &&
-          (data.pendingContactEmailMasked || data.pendingContactEmail)) ||
+        (data && (data.pendingContactEmailMasked || data.pendingContactEmail)) ||
         maskEmail(emailToUpdate);
 
       setPendingEmail(emailToUpdate);
       setPendingEmailMasked(masked);
 
-      toast.success(
-        "Pending contact email saved. Check your inbox for a verification link."
-      );
+      toast.success("Pending contact email saved. Check your inbox for a verification link.");
 
       // Do NOT call onVerify() here — verification via email required.
       setStep("complete");
@@ -318,8 +299,7 @@ export default function VerifyModal({
       }
 
       // update pending mask if api returned fresh value
-      if (data.pendingContactEmailMasked)
-        setPendingEmailMasked(data.pendingContactEmailMasked);
+      if (data.pendingContactEmailMasked) setPendingEmailMasked(data.pendingContactEmailMasked);
       if (data.pendingContactEmail) setPendingEmail(data.pendingContactEmail);
 
       toast.success("Verification email resent — check your inbox.");
@@ -398,30 +378,47 @@ export default function VerifyModal({
             : "Verify & Change Password"}
         </h3>
 
+        {/* OUTSIDE TAG: show pending (unverified) email prominently outside the email selection area */}
+        {pendingEmailMasked && (
+          <div className="mb-3 flex items-center justify-center">
+            <div className="inline-flex items-center gap-3 px-3 py-1 rounded-full bg-yellow-50 border border-yellow-200 text-sm">
+              <span className="font-medium text-yellow-800">{pendingEmailMasked}</span>
+              <span className="text-xs text-yellow-700">Unverified</span>
+              <button
+                onClick={handleResendVerification}
+                disabled={resendLoading}
+                className="ml-2 text-xs px-2 py-1 border rounded bg-white text-gray-800"
+              >
+                {resendLoading ? "Resending..." : "Resend"}
+              </button>
+            </div>
+          </div>
+        )}
+
         {step === "send-code" && (
           <>
             <p className="text-sm text-gray-800 mb-4">
-              We will send a verification code to{" "}
-              <strong>
-                {userEmail
-                  ? maskEmail(userEmail)
-                  : enteredEmail
-                  ? maskEmail(enteredEmail)
-                  : "your email"}
+              We will send a verification code to
+              <strong className="ml-1">
+                {userEmail ? maskEmail(userEmail) : "your login email"}
               </strong>
               .
             </p>
 
-            {!userEmail && (
-              <input
-                type="email"
-                placeholder="Enter email to send code to"
-                value={enteredEmail}
-                onChange={(e) => setEnteredEmail(e.target.value)}
-                className="w-full border rounded px-3 py-2 mb-3 text-black"
-                autoFocus
-              />
-            )}
+            {/* show client contact email as a tag instead of an input */}
+            <div className="mb-3">
+              {userEmail ? (
+                <span className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-gray-100 text-sm text-black">
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+                    <path d="M2.94 6.94a1.5 1.5 0 012.12 0L10 11.88l4.94-4.94a1.5 1.5 0 112.12 2.12l-6 6a1.5 1.5 0 01-2.12 0l-6-6a1.5 1.5 0 010-2.12z" />
+                  </svg>
+                  <span>{maskEmail(userEmail)}</span>
+                  <span className="ml-2 text-xs text-gray-500">client</span>
+                </span>
+              ) : (
+                <span className="text-sm text-gray-500">No client contact email available.</span>
+              )}
+            </div>
 
             <div className="flex justify-end gap-2 mt-2">
               <button
@@ -434,7 +431,7 @@ export default function VerifyModal({
               <button
                 onClick={sendVerification}
                 className="px-3 py-2 bg-blue-600 text-white rounded text-sm"
-                disabled={loading}
+                disabled={loading || !userEmail}
               >
                 {loading ? "Sending..." : "Send Code"}
               </button>
@@ -483,55 +480,32 @@ export default function VerifyModal({
 
         {step === "update-email" && (
           <>
-            <p className="text-sm text-gray-800 mb-3">
-              Select the client email to use or enter a new one.
-            </p>
+            <p className="text-sm text-gray-800 mb-3">Using client email as the contact address.</p>
 
             <div className="mb-3 flex flex-wrap gap-2 items-center">
               {userEmail ? (
                 <span className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-gray-100 text-sm text-black">
-                  <svg
-                    xmlns="http://www.w3.org/2000/svg"
-                    className="h-4 w-4"
-                    viewBox="0 0 20 20"
-                    fill="currentColor"
-                  >
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
                     <path d="M2.94 6.94a1.5 1.5 0 012.12 0L10 11.88l4.94-4.94a1.5 1.5 0 112.12 2.12l-6 6a1.5 1.5 0 01-2.12 0l-6-6a1.5 1.5 0 010-2.12z" />
                   </svg>
                   <span>{maskEmail(userEmail)}</span>
                   <span className="ml-2 text-xs text-gray-500">current</span>
                 </span>
               ) : (
-                <span className="text-sm text-gray-500">
-                  No current contact email (login email will be used)
-                </span>
+                <span className="text-sm text-gray-500">No current contact email (login email will be used)</span>
               )}
             </div>
 
-            {/* allow normal entry of a new contact email */}
-            <input
-              type="email"
-              placeholder="Enter new contact email (optional)"
-              value={updatedEmail}
-              onChange={(e) => setUpdatedEmail(e.target.value)}
-              className="w-full border rounded px-3 py-2 mb-3 text-black"
-            />
-
-            {/* If there's an already pending email, show it and a resend option */}
+            {/* If there's an already pending email, show it and a resend option inside the modal too */}
             {pendingEmailMasked && (
               <div className="mb-3 flex items-center justify-between gap-3">
                 <div>
                   <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-yellow-100 text-sm text-black">
                     <span>{pendingEmailMasked}</span>
-                    <span className="ml-2 text-xs text-yellow-700">
-                      pending verification
-                    </span>
+                    <span className="ml-2 text-xs text-yellow-700">pending verification</span>
                   </div>
-                  {/* show raw pending email if available (helpful to user) */}
                   {pendingEmail && (
-                    <div className="text-xs text-gray-500 mt-1">
-                      Pending email: {pendingEmail}
-                    </div>
+                    <div className="text-xs text-gray-500 mt-1">Pending email: {pendingEmail}</div>
                   )}
                 </div>
 
@@ -549,21 +523,21 @@ export default function VerifyModal({
 
             <div className="flex justify-end gap-2 mt-2">
               <button
-                onClick={() => handleUpdateContact(userEmail || enteredEmail)}
+                onClick={() => handleUpdateContact(userEmail)}
                 className="px-3 py-2 border rounded text-sm text-black"
-                disabled={loading || (!userEmail && !enteredEmail)}
+                disabled={loading || !userEmail}
                 title="Use current client/login email"
               >
                 {loading ? "Processing..." : "Use Client"}
               </button>
 
               <button
-                onClick={() => handleUpdateContact(undefined)}
-                className="px-3 py-2 bg-green-600 text-white rounded text-sm"
-                disabled={loading || !updatedEmail.trim()}
-                title="Use the email entered above"
+                onClick={() => {
+                  onClose();
+                }}
+                className="px-4 py-2 bg-blue-600 text-white rounded"
               >
-                {loading ? "Processing..." : "Save"}
+                Close
               </button>
             </div>
           </>
@@ -601,20 +575,11 @@ export default function VerifyModal({
           <div className="text-center">
             {pendingEmailMasked ? (
               <>
-                <p className="mb-4 text-gray-800">
-                  Pending contact email <strong>{pendingEmailMasked}</strong>{" "}
-                  saved — verification required.
-                </p>
+                <p className="mb-4 text-gray-800">Pending contact email <strong>{pendingEmailMasked}</strong> saved — verification required.</p>
                 {pendingEmail && (
-                  <p className="mb-2 text-sm text-gray-600">
-                    Pending email: {pendingEmail}
-                  </p>
+                  <p className="mb-2 text-sm text-gray-600">Pending email: {pendingEmail}</p>
                 )}
-                <p className="mb-4 text-sm text-gray-600">
-                  Until you verify the new address via the email link, your app
-                  will continue using the current contact email (or your login
-                  email if no contact email exists).
-                </p>
+                <p className="mb-4 text-sm text-gray-600">Until you verify the new address via the email link, your app will continue using the current contact email (or your login email if no contact email exists).</p>
 
                 <div className="flex justify-center gap-2">
                   <button
@@ -637,9 +602,7 @@ export default function VerifyModal({
               </>
             ) : (
               <>
-                <p className="mb-4 text-gray-800">
-                  All set — action completed successfully.
-                </p>
+                <p className="mb-4 text-gray-800">All set — action completed successfully.</p>
                 <div className="flex justify-center gap-2">
                   <button
                     onClick={() => {

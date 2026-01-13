@@ -14,19 +14,21 @@ export default function VerifyContactPage() {
     // Parse uid & token from query string
     try {
     const params = new URLSearchParams(window.location.search);
-      const u = params.get("uid");
-      const t = params.get("token");
-      setUid(u);
-      setToken(t);
+      const uid = params.get("uid");
+      const token = params.get("token");
+      setUid(uid);
+      setToken(token);
+      
+   
 
-      if (!u || !t) {
+      if (!uid || !token) {
         setMessage("Missing verification parameters in the URL.");
         setStatus("error");
         return;
       }
 
       // automatically attempt verification on mount
-      void verify(u, t);
+      void verify(uid, token);
     } catch (err) {
       setMessage("Failed to read verification link.");
       setStatus("error");
@@ -43,7 +45,7 @@ export default function VerifyContactPage() {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ uid: u, token: t }),
+        body: JSON.stringify({ uid, token }),
       });
 
       const data = await res.json().catch(() => ({}));
@@ -89,7 +91,7 @@ export default function VerifyContactPage() {
                 Go to settings
               </button>
               <button
-                className="px-4 py-2 border rounded"
+                className="px-4 py-2 border rounded text-gray-700"
                 onClick={() => (window.location.href = "/")}
               >
                 Home
