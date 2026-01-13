@@ -89,7 +89,7 @@ export async function validateAndFetchUser(
       return { error: response, redirectTo: "login?reason=auth" };
     } else {
       const dec = authRes.decoded as any;
-      console.log(dec); //have both uid and version
+      
       if (dec?.uid == null || dec.version == null) {
         // uid or version is null or undefined, not 0
         const response = NextResponse.json(

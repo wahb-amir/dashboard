@@ -13,7 +13,7 @@ export default function VerifyContactPage() {
   useEffect(() => {
     // Parse uid & token from query string
     try {
-      const params = new URLSearchParams(window.location.search);
+    const params = new URLSearchParams(window.location.search);
       const u = params.get("uid");
       const t = params.get("token");
       setUid(u);
