@@ -134,7 +134,6 @@ export default function ProjectCard({
   const isDashboardHome =
     pathname === "/dashboard" || pathname === "/dashboard/";
   const isProjectPage = pathname.startsWith("/dashboard/projects");
-
   // --- Minimal card for /dashboard (home) ---
   if (isDashboardHome) {
     return (
@@ -211,9 +210,9 @@ export default function ProjectCard({
             </div>
           </div>
 
-          <p className="mt-3 text-sm text-gray-700 line-clamp-3">
+          {/* <p className="mt-3 text-sm text-gray-700 line-clamp-3">
             {description || "No description provided."}
-          </p>
+          </p> */}
 
           {/* progress bar + small meta */}
           <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-3 items-center">
