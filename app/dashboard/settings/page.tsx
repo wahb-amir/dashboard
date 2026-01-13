@@ -99,83 +99,45 @@ const SettingsPage: React.FC = () => {
     setShowVerifyModal(true);
   }
 
-  async function handleVerifyAndProceed() {
-    if (!currentPassword) {
-      toast.error('Enter current password to verify');
-      return;
-    }
+  // REMOVED handleVerifyAndProceed() — verification & update is handled inside VerifyModal now.
+  // When VerifyModal calls onVerify(), we'll refresh user info and update UI.
 
-    const loadingId = toast.loading('Verifying password...');
+  async function handleModalComplete() {
+    // close modal and refresh local user info to pick up updated contactEmail (or other changes)
+    setShowVerifyModal(false);
+
     try {
-      const body: any = { password: currentPassword };
-
-      if (verifyForAction === 'update-contact') {
-        body.contactEmail = contactEmailInput.trim();
-      }
-
-      const res = await fetch('/api/auth/contact-email', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
+      setLoadingUser(true);
+      const res = await fetch('/api/auth/userinfo', {
+        method: 'GET',
+        credentials: 'include',
+        headers: { Accept: 'application/json' },
       });
-
       const data = await res.json().catch(() => ({}));
-      toast.dismiss(loadingId);
-
-      if (!res.ok) {
-        toast.error(data.message || 'Password verification failed');
-        return;
-      }
-
-      setShowVerifyModal(false);
-
-      if (verifyForAction === 'update-contact') {
-        const updated = (data.updatedContactEmail !== undefined)
-          ? data.updatedContactEmail
-          : contactEmailInput.trim();
-        setContactEmail(updated);
-        setContactEmailInput(updated);
-        toast.success('Contact email updated ✅');
-        setCurrentPassword('');
-      } else if (verifyForAction === 'change-password') {
-        await handleChangePassword(true);
+      if (res.ok && data.auth && data.user) {
+        setName(data.user.name);
+        setLoginEmail(data.user.email);
+        setContactEmail(data.user.contactEmail ?? data.user.email ?? '');
+        setContactEmailInput(data.user.contactEmail ?? data.user.email ?? '');
+        // user already got success toasts inside modal; no extra toast required here
+      } else {
+        // If something is off, still inform user
+        toast.success('Action completed — please refresh if you do not see changes.');
       }
     } catch (err) {
-      toast.dismiss(loadingId);
-      toast.error('Verification request failed');
-      console.error(err);
+      console.error('refresh user after verify error:', err);
+      toast.success('Action completed. Please refresh to see changes.');
+    } finally {
+      setLoadingUser(false);
+      setVerifyForAction(null);
+      setCurrentPassword('');
+      setNewPassword('');
     }
   }
 
-  async function handleUpdateContact(verified = false) {
-    if (!verified) {
-      requestVerify('update-contact');
-      return;
-    }
-
-    setSaving(true);
-    const loadId = toast.loading('Updating contact email...');
-    try {
-      const res = await fetch('/api/settings/update-contact-email', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ contactEmail: contactEmailInput.trim() }),
-      });
-      const data = await res.json().catch(() => ({}));
-
-      if (!res.ok ) {
-        toast.error(data.message || 'Failed to update contact email', { id: loadId });
-        return;
-      }
-
-      setContactEmail(contactEmailInput.trim());
-      toast.success('Contact email updated ✅', { id: loadId });
-    } catch (err) {
-      toast.error('Network error while updating contact email', { id: loadId });
-      console.error(err);
-    } finally {
-      setSaving(false);
-    }
+  async function handleUpdateContact() {
+    // start the verification + update flow via modal
+    requestVerify('update-contact');
   }
 
   async function handleChangePassword(verified = false) {
@@ -322,7 +284,7 @@ const SettingsPage: React.FC = () => {
           setCurrentPassword={setCurrentPassword}
           newPassword={newPassword}
           setNewPassword={setNewPassword}
-          onVerify={handleVerifyAndProceed}
+          onVerify={handleModalComplete}
           saving={saving}
         />
       )}

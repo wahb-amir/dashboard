@@ -5,7 +5,7 @@ import User from "@/app/models/User";
 import { verifyToken } from "@/app/utils/token";
 import { AuthTokenPayload } from "@/app/utils/token";
 import crypto from "crypto";
-
+import { verifyPassword } from "@/app/utils/hash";
 export async function POST(req: Request) {
   try {
     const body = await req.json().catch(() => ({}));
@@ -59,7 +59,7 @@ export async function POST(req: Request) {
     }
 
     // If current password is required, verify it
-    if (!currentPassword || !(await (userDoc as any).comparePassword(currentPassword))) {
+    if (!currentPassword || !(await verifyPassword(currentPassword, (userDoc as any).password))) {
       return NextResponse.json({ message: "Current password is incorrect" }, { status: 400 });
     }
 
