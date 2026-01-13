@@ -4,18 +4,24 @@ import { hashPassword } from "@/app/utils/hash";
 
 export interface IUser extends Document {
   name: string;
-  email: string; // login email
-  contactEmail?: string; // separate contact email
+  email: string;
+  contactEmail?: string;
   password: string;
   company?: string;
   role: string;
   createdAt: Date;
   updatedAt: Date;
   refreshVersion: number;
+
   resetCode?: string;
   resetCodeExpires?: Date | null;
-  verficationCode?: string;
-  verficationCodeExpires?: Date | null;
+
+  verificationCode?: string;
+  verificationCodeExpires?: Date | null;
+
+  contactEmailToken?: string;
+  contactEmailTokenExpires?: Date | null;
+
   comparePassword(plain: string): Promise<boolean>;
 }
 
@@ -77,16 +83,27 @@ const UserSchema = new Schema<IUser>(
       default: null,
       required: false,
     },
-    verficationCode: {
+    verificationCode: {
       type: String,
       default: "",
       required: false,
     },
-    verficationCodeExpires: {
+    verificationCodeExpires: {
       type: Date,
       default: null,
       required: false,
     },
+    contactEmailToken: {
+  type: String,
+  required: false,
+  default: "",
+},
+
+contactEmailTokenExpires: {
+  type: Date,
+  required: false,
+  default: null,
+},
   },
   {
     timestamps: true,
@@ -125,7 +142,7 @@ UserSchema.methods.comparePassword = async function (
 // Note: TTL index removes the entire document when the indexed date is older than now.
 // If you only want to expire the code, prefer manual expiry checks and cleanup.
 UserSchema.index({ resetCodeExpires: 1 }, { expireAfterSeconds: 0 });
-UserSchema.index({ verficationCodeExpires: 1 }, { expireAfterSeconds: 0 });
+UserSchema.index({ verificationCodeExpires: 1 }, { expireAfterSeconds: 0 });
 // Prevent model recompilation in dev/hot-reload environments
 const User: Model<IUser> =
   (mongoose.models.User as Model<IUser>) ||

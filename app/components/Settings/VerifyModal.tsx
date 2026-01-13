@@ -392,13 +392,6 @@ export default function VerifyModal({
             />
             <div className="flex justify-end gap-2 mt-2">
               <button
-                onClick={() => setStep("enter-code")}
-                className="px-3 py-2 border rounded text-sm text-black"
-                disabled={loading}
-              >
-                Back
-              </button>
-              <button
                 onClick={handleUpdateContact}
                 className="px-3 py-2 bg-green-600 text-white rounded text-sm"
                 disabled={loading}
@@ -426,12 +419,6 @@ export default function VerifyModal({
               className="w-full border rounded px-3 py-2 mb-3 text-black"
             />
             <div className="flex justify-end gap-2 mt-2">
-              <button
-                onClick={() => setStep("enter-code")}
-                className="px-3 py-2 border rounded text-sm text-black"
-              >
-                Back
-              </button>
               <button
                 onClick={handleChangePassword}
                 className="px-3 py-2 bg-green-600 text-white rounded text-sm"

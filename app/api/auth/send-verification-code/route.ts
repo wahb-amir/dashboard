@@ -8,13 +8,11 @@ import { AuthTokenPayload } from "@/app/utils/token";
 
 function generateCode(length = 6): string {
   const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-  // convert to array, shuffle, and pick first `length` characters
   const shuffled = chars.split('').sort(() => 0.5 - Math.random());
   return shuffled.slice(0, length).join('');
 }
 
 function formatExpiry(date: Date): string {
-  // Friendly human-readable expiry (adjust locale if you want)
   return date.toLocaleString();
 }
 
@@ -34,7 +32,7 @@ export async function POST(req: Request) {
     }
 
     const decoded = verifyRes.decoded as AuthTokenPayload;
-    if (!decoded?.uid || !decoded?.version) {
+    if (decoded?.uid == null || decoded.version == null) {
       return NextResponse.json({ message: "Unauthorized - invalid payload" }, { status: 401 });
     }
 
@@ -58,14 +56,14 @@ export async function POST(req: Request) {
     }
 
     // generate code and expiry (15 minutes)
-    const resetCode = generateCode(6);
+    const verificationCode = generateCode(6);
     const expiresAt = new Date(Date.now() + 15 * 60 * 1000); // 15 minutes
 
-    // persist to user doc (add fields resetCode and resetCodeExpires to schema if not present)
+    // persist to user doc (use correct field names)
     await User.findByIdAndUpdate(decoded.uid, {
       $set: {
-        verficationCode: resetCode,
-        verficationCodeExpires: expiresAt,
+        verificationCode: verificationCode,
+        verificationCodeExpires: expiresAt,
       },
     }).exec();
 
@@ -78,59 +76,59 @@ export async function POST(req: Request) {
       },
     });
 
-    // build a nice HTML email
-   const appUrl = process.env.ORIGIN || "https://dashboard.wahb.space";
+    // build HTML email
+    const appUrl = process.env.ORIGIN || "https://dashboard.wahb.space";
 
-const html = `
-  <div style="font-family:Arial, Helvetica, sans-serif; color:#111;">
-    <div style="max-width:680px;margin:0 auto;padding:24px;border-radius:8px;background:#fff;">
-      <h2 style="margin:0 0 8px 0;color:#0b3d91;">
-        Your Verification Code
-      </h2>
+    const html = `
+      <div style="font-family:Arial, Helvetica, sans-serif; color:#111;">
+        <div style="max-width:680px;margin:0 auto;padding:24px;border-radius:8px;background:#fff;">
+          <h2 style="margin:0 0 8px 0;color:#0b3d91;">
+            Your Verification Code
+          </h2>
 
-      <p style="margin:0 0 16px 0;color:#333;">
-        Hello ${(userDoc as any).name ?? ""},<br/>
-        Use the verification code below to continue. This code will expire in
-        <strong>15 minutes</strong>.
-      </p>
+          <p style="margin:0 0 16px 0;color:#333;">
+            Hello ${(userDoc as any).name ?? ""},<br/>
+            Use the verification code below to continue. This code will expire in
+            <strong>15 minutes</strong>.
+          </p>
 
-      <div style="margin:20px 0;padding:16px;border-radius:8px;background:#f5f7ff;display:flex;align-items:center;justify-content:center;">
-        <span style="font-size:28px;letter-spacing:4px;font-weight:700;color:#0b3d91;">
-          ${resetCode}
-        </span>
+          <div style="margin:20px 0;padding:16px;border-radius:8px;background:#f5f7ff;display:flex;align-items:center;justify-content:center;">
+            <span style="font-size:28px;letter-spacing:4px;font-weight:700;color:#0b3d91;">
+              ${verificationCode}
+            </span>
+          </div>
+
+          <p style="margin:0 0 8px 0;color:#666;">
+            Enter this code in the app to verify your action.  
+            If you did not request this, you can safely ignore this email.
+          </p>
+
+          <p style="margin:16px 0 0 0;color:#666;font-size:13px;">
+            Expires at: <strong>${formatExpiry(expiresAt)}</strong>
+          </p>
+
+          <hr style="margin:18px 0;border:none;border-top:1px solid #eee" />
+
+          <p style="font-size:12px;color:#999;margin:0;">
+            Sent from <a href="${appUrl}" style="color:#0b3d91;text-decoration:none">
+              ${appUrl}
+            </a>
+          </p>
+        </div>
       </div>
-
-      <p style="margin:0 0 8px 0;color:#666;">
-        Enter this code in the app to verify your action.  
-        If you did not request this, you can safely ignore this email.
-      </p>
-
-      <p style="margin:16px 0 0 0;color:#666;font-size:13px;">
-        Expires at: <strong>${formatExpiry(expiresAt)}</strong>
-      </p>
-
-      <hr style="margin:18px 0;border:none;border-top:1px solid #eee" />
-
-      <p style="font-size:12px;color:#999;margin:0;">
-        Sent from <a href="${appUrl}" style="color:#0b3d91;text-decoration:none">
-          ${appUrl}
-        </a>
-      </p>
-    </div>
-  </div>
-`;
+    `;
 
     // send mail
     await transporter.sendMail({
-      from: `"${process.env.EMAIL_FROM_NAME ?? "Your App"}" <${process.env.EMAIL_USER}>`,
+      from: `"${process.env.MAIL_FROM_NAME || "No Reply"}" <${process.env.MAIL_USER}>`,
       to: email,
-      subject: "Your password reset code (expires in 15 minutes)",
+      subject: "Your verification code (expires in 15 minutes)",
       html,
     });
 
     return NextResponse.json({ success: true, message: "Verification code sent" }, { status: 200 });
   } catch (err) {
-    console.error("[send-reset-code] Error:", err);
+    console.error("[send-verification-code] Error:", err);
     return NextResponse.json({ message: "Internal Server Error" }, { status: 500 });
   }
 }
