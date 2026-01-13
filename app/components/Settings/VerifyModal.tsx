@@ -1,10 +1,13 @@
-"use client";
-
 import React, { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import toast, { Toaster } from "react-hot-toast";
 
-type Step = "send-code" | "enter-code" | "update-email" | "change-password" | "complete";
+type Step =
+  | "send-code"
+  | "enter-code"
+  | "update-email"
+  | "change-password"
+  | "complete";
 
 interface VerifyModalProps {
   show: boolean;
@@ -15,7 +18,7 @@ interface VerifyModalProps {
   setCurrentPassword: (v: string) => void;
   newPassword: string;
   setNewPassword: (v: string) => void;
-  onVerify: () => void; // called once flow completes successfully
+  onVerify: () => void; // called once flow completes successfully (password change or final actions)
   saving: boolean;
 }
 
@@ -39,9 +42,16 @@ export default function VerifyModal({
   const [confirmPassword, setConfirmPassword] = useState("");
   const [loading, setLoading] = useState(false);
 
-  // new state for when userEmail is not provided
+  // inputs
   const [enteredEmail, setEnteredEmail] = useState("");
   const [updatedEmail, setUpdatedEmail] = useState("");
+  // pending info (may come from a previous flow or from userinfo)
+  const [pendingEmail, setPendingEmail] = useState<string | null>(null); // raw pending email if provided by API
+  const [pendingEmailMasked, setPendingEmailMasked] = useState<string | null>(
+    null
+  );
+  const [fetchingUserInfo, setFetchingUserInfo] = useState(false);
+  const [resendLoading, setResendLoading] = useState(false);
 
   useEffect(() => {
     const el = elRef.current;
@@ -62,6 +72,13 @@ export default function VerifyModal({
     };
   }, []);
 
+  // When a pendingEmail is discovered (from fetchUserInfo), switch to the complete view.
+  useEffect(() => {
+    if (pendingEmail) {
+      setStep("complete");
+    }
+  }, [pendingEmail]);
+
   useEffect(() => {
     if (!show) {
       setStep("send-code");
@@ -69,23 +86,60 @@ export default function VerifyModal({
       setConfirmPassword("");
       setEnteredEmail("");
       setUpdatedEmail("");
+      setPendingEmail(null);
+      setPendingEmailMasked(null);
       setLoading(false);
+    } else {
+      // when opened, fetch latest userinfo (to get pendingContactEmail if there's one)
+      fetchUserInfo();
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [show]);
 
-  const maskEmail = (email: string) => {
+  const maskEmail = (email: string | null) => {
     if (!email || !email.includes("@")) return email ?? "";
     const [local, domain] = email.split("@");
     const visible = 2;
     const visibleLocal = local.slice(0, Math.max(0, visible));
     const maskedLocal =
-      visibleLocal + "*".repeat(Math.max(0, local.length - visibleLocal.length));
+      visibleLocal +
+      "*".repeat(Math.max(0, local.length - visibleLocal.length));
     return `${maskedLocal}@${domain}`;
+  };
+
+  const fetchUserInfo = async () => {
+    setFetchingUserInfo(true);
+    try {
+      const res = await fetch("/api/auth/userinfo", {
+        method: "GET",
+        credentials: "include",
+      });
+
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) return;
+
+      const pendingRaw = data?.user?.pendingContactEmail ?? null;
+      const pendingMasked = data?.user?.pendingContactEmailMasked ?? null;
+
+      if (pendingRaw) {
+        setPendingEmail(pendingRaw);
+        setPendingEmailMasked(pendingMasked || maskEmail(pendingRaw));
+        // DO NOT set step here — the pendingEmail effect will set the step
+      } else {
+        // clear if none
+        setPendingEmail(null);
+        setPendingEmailMasked(null);
+      }
+    } catch (err) {
+      console.warn("fetchUserInfo error:", err);
+    } finally {
+      setFetchingUserInfo(false);
+    }
   };
 
   if (!show || !elRef.current) return null;
 
-  // Step 1: POST to send verification code (unchanged route as requested)
+  // Step 1: POST to send verification code
   const sendVerification = async () => {
     const emailToUse = userEmail?.trim() || enteredEmail.trim();
     if (!emailToUse) {
@@ -106,7 +160,8 @@ export default function VerifyModal({
       const data = await res.json().catch(() => ({}));
 
       if (!res.ok) {
-        const msg = (data && (data.message || data.error)) || "Failed to send code.";
+        const msg =
+          (data && (data.message || data.error)) || "Failed to send code.";
         toast.error(msg);
         setLoading(false);
         return;
@@ -115,8 +170,6 @@ export default function VerifyModal({
       toast.success(
         `Verification code sent to ${maskEmail(emailToUse)}. Check your inbox.`
       );
-
-      // advance to enter-code step
       setStep("enter-code");
     } catch (err) {
       console.error("sendVerification error:", err);
@@ -126,7 +179,7 @@ export default function VerifyModal({
     }
   };
 
-  // Step 2: Verify code. This must use credentials: 'include' so the server can set a one-time cookie.
+  // Step 2: Verify code. include credentials to allow server to set one-time cookie
   const handleVerify = async () => {
     if (!code.trim()) {
       toast.error("Please enter the verification code.");
@@ -145,20 +198,20 @@ export default function VerifyModal({
         headers: {
           "Content-Type": "application/json",
         },
-        // Important: include credentials so server Set-Cookie for one-time cookie is accepted
         credentials: "include",
         body: JSON.stringify({
           code: code.trim(),
           email: userEmail?.trim() || enteredEmail.trim(),
           currentPassword: currentPassword.trim(),
-          action: verifyForAction, // optional, in case backend needs to know intended action
+          action: verifyForAction,
         }),
       });
 
       const data = await res.json().catch(() => ({}));
 
       if (!res.ok) {
-        const msg = (data && (data.message || data.error)) || "Verification failed.";
+        const msg =
+          (data && (data.message || data.error)) || "Verification failed.";
         toast.error(msg);
         setLoading(false);
         return;
@@ -166,11 +219,11 @@ export default function VerifyModal({
 
       toast.success("Verified successfully.");
 
-      // advance depending on action
       if (verifyForAction === "update-contact") {
         setStep("update-email");
+        // refresh userinfo to ensure any server-state is picked up
+        fetchUserInfo();
       } else {
-        // change-password flow
         setStep("change-password");
       }
     } catch (err) {
@@ -181,15 +234,20 @@ export default function VerifyModal({
     }
   };
 
-  // Step 3 (update-contact): send updated email using the one-time cookie created above
-  const handleUpdateContact = async () => {
-    const emailToUpdate = updatedEmail.trim();
+  // Step 3: create pending contact email
+  const handleUpdateContact = async (emailParam?: string) => {
+    // prefer emailParam, then updatedEmail (user typed), then enteredEmail (from earlier)
+    const emailToUpdate = (
+      emailParam ||
+      updatedEmail ||
+      enteredEmail ||
+      ""
+    ).trim();
     if (!emailToUpdate) {
-      toast.error("Please enter the updated email.");
+      toast.error("Please provide the email to update.");
       return;
     }
 
-    // basic email pattern
     const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     if (!emailPattern.test(emailToUpdate)) {
       toast.error("Please enter a valid email address.");
@@ -198,34 +256,40 @@ export default function VerifyModal({
 
     try {
       setLoading(true);
-      // Use credentials: 'include' so the one-time cookie is sent along with this request
       const res = await fetch("/api/auth/update-contact", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
         credentials: "include",
-        body: JSON.stringify({ email: emailToUpdate }),
+        body: JSON.stringify({ newContactEmail: emailToUpdate }),
       });
 
       const data = await res.json().catch(() => ({}));
 
       if (!res.ok) {
-        const msg = (data && (data.message || data.error)) || "Failed to update email.";
+        const msg =
+          (data && (data.message || data.error)) ||
+          "Failed to set pending contact email.";
         toast.error(msg);
         setLoading(false);
         return;
       }
 
-      toast.success("Contact email updated successfully.");
-      setStep("complete");
+      const masked =
+        (data &&
+          (data.pendingContactEmailMasked || data.pendingContactEmail)) ||
+        maskEmail(emailToUpdate);
 
-      // notify parent that verification/update completed
-      try {
-        onVerify();
-      } catch (e) {
-        console.warn("onVerify callback error:", e);
-      }
+      setPendingEmail(emailToUpdate);
+      setPendingEmailMasked(masked);
+
+      toast.success(
+        "Pending contact email saved. Check your inbox for a verification link."
+      );
+
+      // Do NOT call onVerify() here — verification via email required.
+      setStep("complete");
     } catch (err) {
       console.error("handleUpdateContact error:", err);
       toast.error("Network error — could not update contact email.");
@@ -234,7 +298,47 @@ export default function VerifyModal({
     }
   };
 
-  // Step 3 alternative: change password
+  // Resend verification link handler
+  const handleResendVerification = async () => {
+    try {
+      setResendLoading(true);
+      const res = await fetch("/api/auth/resend-pending-contact", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        const msg =
+          (data && (data.message || data.error)) ||
+          "Failed to resend verification email.";
+        toast.error(msg);
+        setResendLoading(false);
+        return;
+      }
+
+      // update pending mask if api returned fresh value
+      if (data.pendingContactEmailMasked)
+        setPendingEmailMasked(data.pendingContactEmailMasked);
+      if (data.pendingContactEmail) setPendingEmail(data.pendingContactEmail);
+
+      toast.success("Verification email resent — check your inbox.");
+
+      // log dev-only link if provided
+      if (data.devVerificationLink) {
+        // dev helper: console log the link (do not show in production)
+        // eslint-disable-next-line no-console
+        console.info("[dev] verification link:", data.devVerificationLink);
+      }
+    } catch (err) {
+      console.error("handleResendVerification error:", err);
+      toast.error("Network error — could not resend verification email.");
+    } finally {
+      setResendLoading(false);
+    }
+  };
+
+  // Step 3 alternative: change password (unchanged)
   const handleChangePassword = async () => {
     if (!newPassword.trim()) {
       toast.error("Please enter a new password.");
@@ -247,7 +351,6 @@ export default function VerifyModal({
 
     try {
       setLoading(true);
-      // This route name may differ in your backend; adjust accordingly.
       const res = await fetch("/api/auth/change-password", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -261,7 +364,9 @@ export default function VerifyModal({
       const data = await res.json().catch(() => ({}));
 
       if (!res.ok) {
-        const msg = (data && (data.message || data.error)) || "Failed to change password.";
+        const msg =
+          (data && (data.message || data.error)) ||
+          "Failed to change password.";
         toast.error(msg);
         setLoading(false);
         return;
@@ -307,7 +412,6 @@ export default function VerifyModal({
               .
             </p>
 
-            {/* ask for email if not provided by parent */}
             {!userEmail && (
               <input
                 type="email"
@@ -380,23 +484,86 @@ export default function VerifyModal({
         {step === "update-email" && (
           <>
             <p className="text-sm text-gray-800 mb-3">
-              Enter the new email to associate with your account.
+              Select the client email to use or enter a new one.
             </p>
+
+            <div className="mb-3 flex flex-wrap gap-2 items-center">
+              {userEmail ? (
+                <span className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-gray-100 text-sm text-black">
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    className="h-4 w-4"
+                    viewBox="0 0 20 20"
+                    fill="currentColor"
+                  >
+                    <path d="M2.94 6.94a1.5 1.5 0 012.12 0L10 11.88l4.94-4.94a1.5 1.5 0 112.12 2.12l-6 6a1.5 1.5 0 01-2.12 0l-6-6a1.5 1.5 0 010-2.12z" />
+                  </svg>
+                  <span>{maskEmail(userEmail)}</span>
+                  <span className="ml-2 text-xs text-gray-500">current</span>
+                </span>
+              ) : (
+                <span className="text-sm text-gray-500">
+                  No current contact email (login email will be used)
+                </span>
+              )}
+            </div>
+
+            {/* allow normal entry of a new contact email */}
             <input
               type="email"
-              placeholder="New email"
+              placeholder="Enter new contact email (optional)"
               value={updatedEmail}
               onChange={(e) => setUpdatedEmail(e.target.value)}
               className="w-full border rounded px-3 py-2 mb-3 text-black"
-              autoFocus
             />
+
+            {/* If there's an already pending email, show it and a resend option */}
+            {pendingEmailMasked && (
+              <div className="mb-3 flex items-center justify-between gap-3">
+                <div>
+                  <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-yellow-100 text-sm text-black">
+                    <span>{pendingEmailMasked}</span>
+                    <span className="ml-2 text-xs text-yellow-700">
+                      pending verification
+                    </span>
+                  </div>
+                  {/* show raw pending email if available (helpful to user) */}
+                  {pendingEmail && (
+                    <div className="text-xs text-gray-500 mt-1">
+                      Pending email: {pendingEmail}
+                    </div>
+                  )}
+                </div>
+
+                <div className="flex gap-2">
+                  <button
+                    onClick={handleResendVerification}
+                    className="px-3 py-1 border rounded text-sm text-black"
+                    disabled={resendLoading}
+                  >
+                    {resendLoading ? "Resending..." : "Resend link"}
+                  </button>
+                </div>
+              </div>
+            )}
+
             <div className="flex justify-end gap-2 mt-2">
               <button
-                onClick={handleUpdateContact}
-                className="px-3 py-2 bg-green-600 text-white rounded text-sm"
-                disabled={loading}
+                onClick={() => handleUpdateContact(userEmail || enteredEmail)}
+                className="px-3 py-2 border rounded text-sm text-black"
+                disabled={loading || (!userEmail && !enteredEmail)}
+                title="Use current client/login email"
               >
-                {loading ? "Updating..." : "Update Email"}
+                {loading ? "Processing..." : "Use Client"}
+              </button>
+
+              <button
+                onClick={() => handleUpdateContact(undefined)}
+                className="px-3 py-2 bg-green-600 text-white rounded text-sm"
+                disabled={loading || !updatedEmail.trim()}
+                title="Use the email entered above"
+              >
+                {loading ? "Processing..." : "Save"}
               </button>
             </div>
           </>
@@ -432,18 +599,59 @@ export default function VerifyModal({
 
         {step === "complete" && (
           <div className="text-center">
-            <p className="mb-4 text-gray-800">All set — action completed successfully.</p>
-            <div className="flex justify-center gap-2">
-              <button
-                onClick={() => {
-                  onClose();
-                  // reset states in parent if needed; modal will reset on hide
-                }}
-                className="px-4 py-2 bg-blue-600 text-white rounded"
-              >
-                Close
-              </button>
-            </div>
+            {pendingEmailMasked ? (
+              <>
+                <p className="mb-4 text-gray-800">
+                  Pending contact email <strong>{pendingEmailMasked}</strong>{" "}
+                  saved — verification required.
+                </p>
+                {pendingEmail && (
+                  <p className="mb-2 text-sm text-gray-600">
+                    Pending email: {pendingEmail}
+                  </p>
+                )}
+                <p className="mb-4 text-sm text-gray-600">
+                  Until you verify the new address via the email link, your app
+                  will continue using the current contact email (or your login
+                  email if no contact email exists).
+                </p>
+
+                <div className="flex justify-center gap-2">
+                  <button
+                    onClick={handleResendVerification}
+                    className="px-3 py-2 border rounded text-sm text-black"
+                    disabled={resendLoading}
+                  >
+                    {resendLoading ? "Resending..." : "Resend verification"}
+                  </button>
+
+                  <button
+                    onClick={() => {
+                      onClose();
+                    }}
+                    className="px-4 py-2 bg-blue-600 text-white rounded"
+                  >
+                    Close
+                  </button>
+                </div>
+              </>
+            ) : (
+              <>
+                <p className="mb-4 text-gray-800">
+                  All set — action completed successfully.
+                </p>
+                <div className="flex justify-center gap-2">
+                  <button
+                    onClick={() => {
+                      onClose();
+                    }}
+                    className="px-4 py-2 bg-blue-600 text-white rounded"
+                  >
+                    Close
+                  </button>
+                </div>
+              </>
+            )}
           </div>
         )}
       </div>
