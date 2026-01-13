@@ -48,11 +48,6 @@ export async function GET(req: Request) {
       return NextResponse.json({ auth: false }, { status: 401 });
     }
 
-    console.log("[userinfo] 👤 User found", {
-      userId: userDoc._id.toString(),
-      refreshVersion: (userDoc as any).refreshVersion,
-    });
-
     if ((userDoc as any).refreshVersion !== decoded.version) {
       console.warn("[userinfo]  Token version mismatch", {
         refreshVersion: decoded.version,
@@ -61,14 +56,13 @@ export async function GET(req: Request) {
       return NextResponse.json({ auth: false }, { status: 401 });
     }
 
-    console.log("[userinfo]  Auth success");
-
     return NextResponse.json(
       {
         auth: true,
         user: {
           name: userDoc.name,
           email: userDoc.email,
+          contactEmail: userDoc.contactEmail ||null,
         },
       },
       { status: 200 }

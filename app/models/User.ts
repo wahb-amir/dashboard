@@ -1,9 +1,10 @@
 import mongoose, { Document, Model, Schema } from "mongoose";
+import bcrypt from "bcryptjs";
 import { hashPassword } from "@/app/utils/hash";
 
 export interface IUser extends Document {
   name: string;
-  email: string;         // login email
+  email: string; // login email
   contactEmail?: string; // separate contact email
   password: string;
   company?: string;
@@ -11,7 +12,11 @@ export interface IUser extends Document {
   createdAt: Date;
   updatedAt: Date;
   refreshVersion: number;
-  comparePassword?: (plain: string) => Promise<boolean>;
+  resetCode?: string;
+  resetCodeExpires?: Date | null;
+  verficationCode?: string;
+  verficationCodeExpires?: Date | null;
+  comparePassword(plain: string): Promise<boolean>;
 }
 
 const UserSchema = new Schema<IUser>(
@@ -30,19 +35,19 @@ const UserSchema = new Schema<IUser>(
       trim: true,
       index: true,
     },
-   contactEmail: {
-  type: String,
-  required: false,
-  lowercase: true,
-  trim: true,
-  default: "",
-  validate: {
-    validator: function (v: string) {
-      return v === "" || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v);
+    contactEmail: {
+      type: String,
+      required: false,
+      lowercase: true,
+      trim: true,
+      default: "",
+      validate: {
+        validator: function (v: string) {
+          return v === "" || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v);
+        },
+        message: "Invalid email",
+      },
     },
-    message: "Invalid email",
-  },
-},
     password: {
       type: String,
       required: true,
@@ -62,6 +67,26 @@ const UserSchema = new Schema<IUser>(
       type: Number,
       default: 0,
     },
+    resetCode: {
+      type: String,
+      default: "",
+      required: false,
+    },
+    resetCodeExpires: {
+      type: Date,
+      default: null,
+      required: false,
+    },
+    verficationCode: {
+      type: String,
+      default: "",
+      required: false,
+    },
+    verficationCodeExpires: {
+      type: Date,
+      default: null,
+      required: false,
+    },
   },
   {
     timestamps: true,
@@ -76,7 +101,7 @@ const UserSchema = new Schema<IUser>(
   }
 );
 
-// Only hash password if it's new or modified
+// Hash password when created or modified
 UserSchema.pre<IUser>("save", async function () {
   if (!this.isModified("password")) return;
 
@@ -88,10 +113,19 @@ UserSchema.pre<IUser>("save", async function () {
   }
 });
 
-UserSchema.methods.comparePassword = async function (plain: string) {
-  throw new Error("comparePassword not implemented - use your compare util");
+// comparePassword implementation
+UserSchema.methods.comparePassword = async function (
+  this: IUser,
+  plain: string
+) {
+  return bcrypt.compare(plain, this.password);
 };
 
+// TTL index for resetCodeExpires (documents where resetCodeExpires is set and older than now will be removed)
+// Note: TTL index removes the entire document when the indexed date is older than now.
+// If you only want to expire the code, prefer manual expiry checks and cleanup.
+UserSchema.index({ resetCodeExpires: 1 }, { expireAfterSeconds: 0 });
+UserSchema.index({ verficationCodeExpires: 1 }, { expireAfterSeconds: 0 });
 // Prevent model recompilation in dev/hot-reload environments
 const User: Model<IUser> =
   (mongoose.models.User as Model<IUser>) ||

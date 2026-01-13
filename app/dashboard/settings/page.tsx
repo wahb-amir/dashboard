@@ -59,8 +59,8 @@ const SettingsPage: React.FC = () => {
         if (!mounted) return;
         setName(data.user.name);
         setLoginEmail(data.user.email);
-        setContactEmail(data.user.email ?? '');
-        setContactEmailInput(data.user.email ?? '');
+        setContactEmail(data.user.contactEmail ?? data.user.email ?? '');
+        setContactEmailInput(data.user.contactEmail ?? data.user.email ?? '');
 
         // fetch devices after user is loaded
         fetchDevices();
@@ -312,16 +312,20 @@ const SettingsPage: React.FC = () => {
 
       <SessionSection onLogoutCurrent={handleLogoutCurrent} />
 
-      <VerifyModal
-        show={showVerifyModal}
-        onClose={() => setShowVerifyModal(false)}
-        onVerify={handleVerifyAndProceed}
-        verifyForAction={verifyForAction}
-        currentPassword={currentPassword}
-        setCurrentPassword={setCurrentPassword}
-        newPassword={newPassword}
-        setNewPassword={setNewPassword}
-      />
+      {verifyForAction && (
+        <VerifyModal
+          show={showVerifyModal}
+          onClose={() => setShowVerifyModal(false)}
+          userEmail={contactEmail || loginEmail}
+          verifyForAction={verifyForAction}
+          currentPassword={currentPassword}
+          setCurrentPassword={setCurrentPassword}
+          newPassword={newPassword}
+          setNewPassword={setNewPassword}
+          onVerify={handleVerifyAndProceed}
+          saving={saving}
+        />
+      )}
     </div>
   );
 };
