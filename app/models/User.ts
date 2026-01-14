@@ -3,6 +3,14 @@ import bcrypt from "bcryptjs";
 import crypto from "crypto";
 import { hashPassword } from "@/app/utils/hash";
 
+interface LoginRecord {
+  deviceId: string;
+  fingerprint: string;
+  ip: string;
+  userAgent?: string;
+  timestamp: Date;
+}
+
 export interface IUser extends Document {
   name: string;
   email: string;
@@ -27,6 +35,8 @@ export interface IUser extends Document {
 
   contactEmailToken?: string;
   contactEmailTokenExpires?: Date | null;
+
+  lastLogin: LoginRecord[];
 
   comparePassword(plain: string): Promise<boolean>;
 
@@ -64,6 +74,18 @@ const UserSchema = new Schema<IUser>(
         },
         message: "Invalid email",
       },
+    },
+    lastLogin: {
+      type: [
+        {
+          deviceId: { type: String, required: true },
+          fingerprint: { type: String, required: true },
+          ip: { type: String, required: true },
+          userAgent: { type: String },
+          timestamp: { type: Date, default: Date.now },
+        },
+      ],
+      default: [],
     },
     // whether the contactEmail has been verified (true only after successful verification)
     contactEmailVerified: {
@@ -210,7 +232,9 @@ UserSchema.methods.setPendingContactEmail = async function (
   const token = crypto.randomBytes(24).toString("hex");
   this.pendingContactEmail = sanitized;
   this.pendingContactEmailToken = token;
-  this.pendingContactEmailTokenExpires = new Date(Date.now() + ttlHours * 60 * 60 * 1000);
+  this.pendingContactEmailTokenExpires = new Date(
+    Date.now() + ttlHours * 60 * 60 * 1000
+  );
 
   // When user requests a change, mark contactEmailVerified false until they verify
   this.contactEmailVerified = false;
@@ -225,8 +249,13 @@ UserSchema.methods.verifyPendingContactEmail = async function (
   token: string
 ) {
   if (!token) return false;
-  if (!this.pendingContactEmailToken || this.pendingContactEmailToken !== token) return false;
-  if (!this.pendingContactEmailTokenExpires || this.pendingContactEmailTokenExpires < new Date()) return false;
+  if (!this.pendingContactEmailToken || this.pendingContactEmailToken !== token)
+    return false;
+  if (
+    !this.pendingContactEmailTokenExpires ||
+    this.pendingContactEmailTokenExpires < new Date()
+  )
+    return false;
 
   // apply the pending email
   this.contactEmail = this.pendingContactEmail;
@@ -249,6 +278,7 @@ UserSchema.index({ email: 1 });
 
 // Prevent model recompilation in dev/hot-reload environments
 const User: Model<IUser> =
-  (mongoose.models.User as Model<IUser>) || mongoose.model<IUser>("User", UserSchema);
+  (mongoose.models.User as Model<IUser>) ||
+  mongoose.model<IUser>("User", UserSchema);
 
 export default User;

@@ -5,7 +5,7 @@ import { verifyToken } from "@/app/utils/token";
 import connectToDatabase from "@/app/utils/mongodb";
 import Quote from "@/app/models/Quote";
 import User from "@/app/models/User";
-
+import { cookies } from "next/headers";
 /**
  * SaveQuote expects the decoded refresh token (refreshDecoded)
  * and returns { ok: boolean, quote?: any, message?: string }.
@@ -79,6 +79,7 @@ const SaveQuote = async (payload: Record<string, any>, refreshDecoded: any) => {
 export async function POST(request: Request) {
   try {
     // --- 1. Parse body according to content-type ---
+    const cookieStore= await cookies();
     const contentType = (request.headers.get("content-type") || "").toLowerCase();
 
     // single mutable entries object for both branches

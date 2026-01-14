@@ -4,8 +4,10 @@ import connectToDatabase from '@/app/utils/mongodb';
 import { verifyToken } from '@/app/utils/token';
 import Project from '@/app/models/Projects';
 import User from '@/app/models/User';
+import { cookies } from 'next/headers';
 export async function PATCH(request) {
   try {
+    const cookieStore = await cookies();
     // auth token (either access or refresh)
     const authToken = request.cookies.get('authToken')?.value || request.cookies.get('refreshToken')?.value;
     if (!authToken) {

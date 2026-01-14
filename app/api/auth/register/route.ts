@@ -3,9 +3,12 @@ import { NextResponse as Response, NextRequest } from "next/server";
 import validator from "validator";
 import connectToMongoose from "@/app/utils/mongodb";
 import User from "@/app/models/User";
+import Session from "@/app/models/Session";
 import { verifyToken, generateToken } from "@/app/utils/token";
 import redis from "@/app/utils/redis";
-
+import crypto from "crypto";
+import { v4 as uuidv4 } from "uuid";
+import { recordSuccessfulLogin } from "@/app/utils/session";
 type RegisterBody = {
   name?: unknown;
   email?: unknown;
@@ -42,6 +45,20 @@ const safeDel = (key: string): Promise<any> =>
     ? (redis.del(key) as Promise<any>)
     : Promise.resolve(null);
 
+// -------------------- helpers --------------------
+function makeFingerprint(userAgent: string, ip: string) {
+  const secret = process.env.FP_SECRET || "change_this_secret";
+  return crypto
+    .createHmac("sha256", secret)
+    .update(`${userAgent}|${ip}`)
+    .digest("hex");
+}
+
+function hashToken(token: string) {
+  return crypto.createHash("sha256").update(token).digest("hex");
+}
+
+// -------------------- route --------------------
 export async function POST(request: NextRequest): Promise<Response> {
   try {
     const body = (await request.json()) as RegisterBody;
@@ -195,25 +212,72 @@ export async function POST(request: NextRequest): Promise<Response> {
       keyEmail ? safeDel(keyEmail) : Promise.resolve(),
     ]);
 
-    // tokens
-    const authToken = generateToken({
-      uid: newUserId,
-      role: "client",
-      name: name.trim(),
-      company: company ? company : false,
+    // -------------------- create session & tokens --------------------
+    // device info
+    const userAgent =
+      request.headers.get("user-agent")?.slice(0, 1024) || "unknown_ua";
+
+    // compute fingerprint (HMAC of UA + IP using server secret)
+    const fingerprint = makeFingerprint(userAgent, ip);
+
+    // session id
+    const sid = uuidv4();
+
+    // create session document (store full device info and hashed refresh token later)
+    const sessionDoc = new Session({
+      userId: saved._id,
+      sid,
+      userAgent,
+      ip, // consider hashing IP in DB for extra privacy if desired
+      os: undefined,
+      browser: undefined,
+      deviceName: undefined,
+      fingerprint,
+      revoked: false,
+      blocked: false,
+      createdAt: new Date(),
+      lastUsedAt: new Date(),
+      expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), // 7 days
     });
-    const refreshToken = generateToken(
+    await recordSuccessfulLogin(
+      newUserId,
+      sid, // use session id as deviceId
+      fingerprint, // computed HMAC fingerprint
+      ip,
+      userAgent
+    );
+    // generate tokens
+    // access token (short-lived) — include sid optionally
+    const authToken = generateToken(
       {
         uid: newUserId,
         role: "client",
         name: name.trim(),
         company: company ? company : false,
-        refreshVersion: saved.refreshVersion,
+        sid,
       },
-      "REFRESH",
-      { expiresIn: "7d" }
+      "AUTH",
+      { expiresIn: "1h" }
     );
 
+    // refresh token payload MUST include sid + fingerprintHash (not raw UA/ip)
+    const refreshTokenPayload = {
+      uid: newUserId,
+      role: "client",
+      sid,
+      fp: fingerprint,
+      refreshVersion: saved.refreshVersion,
+    };
+
+    const refreshToken = generateToken(refreshTokenPayload, "REFRESH", {
+      expiresIn: "7d",
+    });
+
+    // store only the hash of the refresh token in session doc
+    sessionDoc.refreshTokenHash = hashToken(refreshToken);
+    await sessionDoc.save();
+
+    // set cookies on response
     const res = Response.json(
       {
         message: "Registration successful",
@@ -228,6 +292,7 @@ export async function POST(request: NextRequest): Promise<Response> {
       { status: 201 }
     );
 
+    // auth token cookie (short-lived)
     res.cookies.set({
       name: "authToken",
       value: authToken,
@@ -235,9 +300,10 @@ export async function POST(request: NextRequest): Promise<Response> {
       secure: process.env.NODE_ENV === "production",
       sameSite: "strict",
       path: "/",
-      maxAge: 60 * 60,
+      maxAge: 60 * 60, // 1 hour
     });
 
+    // refresh token cookie (httpOnly, long lived)
     res.cookies.set({
       name: "refreshToken",
       value: refreshToken,
@@ -245,9 +311,10 @@ export async function POST(request: NextRequest): Promise<Response> {
       secure: process.env.NODE_ENV === "production",
       sameSite: "strict",
       path: "/",
-      maxAge: 7 * 24 * 60 * 60,
+      maxAge: 7 * 24 * 60 * 60, // 7 days
     });
 
+    // clear appToken if you used it earlier
     res.cookies.set({
       name: "appToken",
       value: "",
