@@ -46,6 +46,8 @@ export async function GET(req: Request) {
     }
 
     if ((userDoc as any).refreshVersion !== decoded.version) {
+       cookieStore.delete("refreshToken");
+            cookieStore.delete("authToken");
       console.warn("[userinfo] Token version mismatch");
       return NextResponse.json({ auth: false }, { status: 401 });
     }
@@ -58,11 +60,10 @@ export async function GET(req: Request) {
         auth: true,
         user: {
           name: userDoc.name,
-          email: userDoc.email, // login email
+          email: userDoc.email, 
           contactEmail,
           contactEmailVerified: Boolean(contactEmail),
 
-          // 🔐 new fields
           pendingContactEmail,
           pendingContactEmailMasked: maskEmail(pendingContactEmail),
         },

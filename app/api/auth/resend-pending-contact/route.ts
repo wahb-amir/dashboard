@@ -40,7 +40,11 @@ export async function POST(req: Request) {
     if (!userDoc) {
       return NextResponse.json({ message: "Unauthorized - user not found" }, { status: 401 });
     }
-
+    if(userDoc?.refreshVersion!=decoded.version){
+       cookieStore.delete("refreshToken");
+            cookieStore.delete("authToken");
+      return NextResponse.json({message:"session revoked"},{status:401});
+    }
     // Must have a pendingContactEmail to resend to
     const pending = (userDoc as any).pendingContactEmail;
     if (!pending) {

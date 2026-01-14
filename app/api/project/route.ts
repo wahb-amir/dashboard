@@ -91,7 +91,7 @@ export async function validateAndFetchUser(
       const dec = authRes.decoded as any;
       
       if (dec?.uid == null || dec.version == null) {
-        // uid or version is null or undefined, not 0
+      
         const response = NextResponse.json(
           { ok: false, message: "Invalid auth token: missing uid." },
           { status: 401 }
@@ -125,6 +125,8 @@ export async function validateAndFetchUser(
       }
 
       if (user.refreshVersion !== tokenVersion) {
+         cookieStore.delete("refreshToken");
+            cookieStore.delete("authToken");
         const response = NextResponse.json(
           { ok: false, message: "Auth token revoked." },
           { status: 401 }

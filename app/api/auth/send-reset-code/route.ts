@@ -48,6 +48,8 @@ export async function POST(req: Request) {
 
     // optional: verify refreshVersion matches
     if ((userDoc as any).refreshVersion !== decoded.version) {
+       cookieStore.delete("refreshToken");
+            cookieStore.delete("authToken");
       return NextResponse.json({ message: "Session revoked" }, { status: 401 });
     }
 
