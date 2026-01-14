@@ -8,6 +8,7 @@ import User from "@/app/models/User";
 import mongoose from "mongoose";
 import { v4 as uuidv4 } from "uuid";
 import Quote from "@/app/models/Quote";
+import { cookies } from "next/headers";
 /**
  * Keep the allowed statuses and the StepStatus type at the top so everything
  * that uses StepStatus has it available (no duplicate declarations).
@@ -76,6 +77,7 @@ export async function validateAndFetchUser(
   | { error: NextResponse; redirectTo?: string; uid?: never; user?: never }
   | null
 > {
+  const cookieStore= await cookies();
   // If there's an auth token attempt to use it first — but enforce version check
   if (refreshToken) {
     const authRes = verifyToken(refreshToken, "REFRESH");

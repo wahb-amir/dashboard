@@ -4,11 +4,12 @@ import { verifyToken } from "@/app/utils/token";
 import connectToDatabase from "@/app/utils/mongodb";
 import Quote from "@/app/models/Quote";
 import User from "@/app/models/User";
-
+import { cookies } from "next/headers";
 export async function DELETE(
   request: Request,
   context: { params: Promise<{ id: string }> }
 ) {
+  const cookieStore = await cookies();
   try {
     const { id } = await context.params; 
 

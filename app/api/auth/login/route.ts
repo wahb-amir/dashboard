@@ -3,17 +3,18 @@ import { NextResponse as Response, NextRequest } from "next/server";
 import validator from "validator";
 import connectToMongoose from "@/app/utils/mongodb";
 import User from "@/app/models/User";
+import Session from "@/app/models/Session";
 import { verifyToken, generateToken } from "@/app/utils/token";
 import type { DecodedToken } from "@/app/utils/token";
 import { verifyPassword } from "@/app/utils/hash";
 import redis from "@/app/utils/redis";
-
+import crypto from "crypto";
+import { v4 as uuidv4 } from "uuid";
+import { recordSuccessfulLogin } from "@/app/utils/session";
 type LoginBody = {
   email?: unknown;
   password?: unknown;
 };
-
-
 
 // Safe redis helpers (no-op when redis missing)
 const safeGet = (key: string): Promise<string | null> =>
@@ -36,6 +37,20 @@ const safeDel = (key: string): Promise<any> =>
     ? (redis.del(key) as Promise<any>)
     : Promise.resolve(null);
 
+// -------------------- helpers --------------------
+function makeFingerprint(userAgent: string, ip: string) {
+  const secret = process.env.FP_SECRET || "change_this_secret";
+  return crypto
+    .createHmac("sha256", secret)
+    .update(`${userAgent}|${ip}`)
+    .digest("hex");
+}
+
+function hashToken(token: string) {
+  return crypto.createHash("sha256").update(token).digest("hex");
+}
+
+// -------------------- route --------------------
 export async function POST(request: NextRequest): Promise<Response> {
   try {
     const body = (await request.json()) as LoginBody;
@@ -124,25 +139,62 @@ export async function POST(request: NextRequest): Promise<Response> {
     // success — clear attempts
     await safeDel(key);
 
-    const userId = user._id.toString();
-    const clientAuthToken = generateToken({
-      uid: userId,
-      role: user.role || "client",
-      name: user.name || "",
-      company: user.company || "",
+    // -------------------- create session & tokens --------------------
+    const userAgent =
+      request.headers.get("user-agent")?.slice(0, 1024) || "unknown_ua";
+
+    const fingerprint = makeFingerprint(userAgent, ip);
+    const sid = uuidv4();
+
+    const sessionDoc = new Session({
+      userId: user._id,
+      sid,
+      userAgent,
+      ip,
+      os: undefined,
+      browser: undefined,
+      deviceName: undefined,
+      fingerprint,
+      revoked: false,
+      blocked: false,
+      createdAt: new Date(),
+      lastUsedAt: new Date(),
+      expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), // 7 days
     });
-    const refreshToken = generateToken(
+    await recordSuccessfulLogin(user._id.toString(), sid, fingerprint, ip, userAgent);
+    // access token (short-lived) — include sid optionally
+    const clientAuthToken = generateToken(
       {
-        uid: userId,
+        uid: user._id.toString(),
         role: user.role || "client",
         name: user.name || "",
         company: user.company || "",
-        version:user.refreshVersion
+        sid,
+      },
+      "AUTH",
+      { expiresIn: "1h" }
+    );
+
+    // refresh token payload includes sid + fingerprint hash
+    const refreshToken = generateToken(
+      {
+        uid: user._id.toString(),
+        role: user.role || "client",
+        name: user.name || "",
+        company: user.company || "",
+        sid,
+        fp: fingerprint,
+        version: user.refreshVersion,
       },
       "REFRESH",
       { expiresIn: "7d" }
     );
 
+    // store only hash of refresh token
+    sessionDoc.refreshTokenHash = hashToken(refreshToken);
+    await sessionDoc.save();
+
+    const userId = user._id.toString();
     const res = Response.json(
       {
         message: "Login successful",

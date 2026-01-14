@@ -32,14 +32,19 @@ export interface InternalTokenPayload {
 }
 
 export interface AuthTokenPayload {
-  uid: string;
-  email?: string;
-  role?: string;
-  name?: string;
-  iat?: number;
-  exp?: number;
-  [key: string]: any;
+  uid: string;              
+  email?: string;            
+  role?: string;            
+  name?: string;            
+  company?: string 
+  deviceId?: string;         
+  fingerprint?: string;    
+  refreshVersion?: number;   
+  iat?: number;             
+  exp?: number;              
+  [key: string]: any;        
 }
+
 
 export interface GenerateTokenOptions {
   expiresIn?: string | number;
