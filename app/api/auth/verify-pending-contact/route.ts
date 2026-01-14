@@ -19,10 +19,13 @@ export async function POST(req: Request) {
 
     const decoded = verifyRes.decoded as AuthTokenPayload;
     if (decoded?.uid == null || decoded.version == null) {
+       cookieStore.delete("refreshToken");
+            cookieStore.delete("authToken");
       return NextResponse.json({ message: "Unauthorized - invalid payload" }, { status: 401 });
     }
     const body = await req.json().catch(() => ({}));
     const {token } = body || {};
+    
     if(!token){
         return NextResponse.json({message:"Missing uid or token"}, {status:400});
     }
@@ -38,7 +41,11 @@ export async function POST(req: Request) {
 
     // update user document to verify contact email
     (userDoc as any).contactEmailVerified = true;
-    (userDoc as any).pendingContactToken = null;
+    (userDoc as any).pendingContactEmailToken = null;
+    (userDoc as any).pendingContactEmailTokenExpires = null;
+    (userDoc as any).contactEmail = (userDoc as any).pendingContactEmail;
+    (userDoc as any).pendingContactEmail = null;
+
     await userDoc.save();
     return NextResponse.json({message:"Contact email verified successfully"}, {status:200});
   } catch (e) {

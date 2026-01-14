@@ -44,9 +44,16 @@ export default function VerifyModal({
 
   // pending info (may come from a previous flow or from userinfo)
   const [pendingEmail, setPendingEmail] = useState<string | null>(null); // raw pending email if provided by API
-  const [pendingEmailMasked, setPendingEmailMasked] = useState<string | null>(null);
+  const [pendingEmailMasked, setPendingEmailMasked] = useState<string | null>(
+    null
+  );
   const [fetchingUserInfo, setFetchingUserInfo] = useState(false);
   const [resendLoading, setResendLoading] = useState(false);
+
+  // NEW: states to support cancelling/changing a pending email
+  const [cancelLoading, setCancelLoading] = useState(false);
+  const [editingPending, setEditingPending] = useState(false);
+  const [editPendingEmail, setEditPendingEmail] = useState("");
 
   useEffect(() => {
     const el = elRef.current;
@@ -82,6 +89,8 @@ export default function VerifyModal({
       setPendingEmail(null);
       setPendingEmailMasked(null);
       setLoading(false);
+      setEditingPending(false);
+      setEditPendingEmail("");
     } else {
       // when opened, fetch latest userinfo (to get pendingContactEmail if there's one)
       fetchUserInfo();
@@ -95,7 +104,8 @@ export default function VerifyModal({
     const visible = 2;
     const visibleLocal = local.slice(0, Math.max(0, visible));
     const maskedLocal =
-      visibleLocal + "*".repeat(Math.max(0, local.length - visibleLocal.length));
+      visibleLocal +
+      "*".repeat(Math.max(0, local.length - visibleLocal.length));
     return `${maskedLocal}@${domain}`;
   };
 
@@ -159,7 +169,9 @@ export default function VerifyModal({
         return;
       }
 
-      toast.success(`Verification code sent to ${maskEmail(emailToUse)}. Check your inbox.`);
+      toast.success(
+        `Verification code sent to ${maskEmail(emailToUse)}. Check your inbox.`
+      );
       setStep("enter-code");
     } catch (err) {
       console.error("sendVerification error:", err);
@@ -225,17 +237,18 @@ export default function VerifyModal({
   };
 
   // Step 3: create pending contact email (now only supports using the client email)
+  // RETURNS boolean for callers who want to await success/failure
   const handleUpdateContact = async (emailParam?: string) => {
     const emailToUpdate = (emailParam || "").trim();
     if (!emailToUpdate) {
       toast.error("No contact email available to set as pending.");
-      return;
+      return false;
     }
 
     const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     if (!emailPattern.test(emailToUpdate)) {
       toast.error("Client contact email seems invalid.");
-      return;
+      return false;
     }
 
     try {
@@ -257,23 +270,28 @@ export default function VerifyModal({
           "Failed to set pending contact email.";
         toast.error(msg);
         setLoading(false);
-        return;
+        return false;
       }
 
       const masked =
-        (data && (data.pendingContactEmailMasked || data.pendingContactEmail)) ||
+        (data &&
+          (data.pendingContactEmailMasked || data.pendingContactEmail)) ||
         maskEmail(emailToUpdate);
 
       setPendingEmail(emailToUpdate);
       setPendingEmailMasked(masked);
 
-      toast.success("Pending contact email saved. Check your inbox for a verification link.");
+      toast.success(
+        "Pending contact email saved. Check your inbox for a verification link."
+      );
 
       // Do NOT call onVerify() here — verification via email required.
       setStep("complete");
+      return true;
     } catch (err) {
       console.error("handleUpdateContact error:", err);
       toast.error("Network error — could not update contact email.");
+      return false;
     } finally {
       setLoading(false);
     }
@@ -299,7 +317,8 @@ export default function VerifyModal({
       }
 
       // update pending mask if api returned fresh value
-      if (data.pendingContactEmailMasked) setPendingEmailMasked(data.pendingContactEmailMasked);
+      if (data.pendingContactEmailMasked)
+        setPendingEmailMasked(data.pendingContactEmailMasked);
       if (data.pendingContactEmail) setPendingEmail(data.pendingContactEmail);
 
       toast.success("Verification email resent — check your inbox.");
@@ -315,6 +334,55 @@ export default function VerifyModal({
       toast.error("Network error — could not resend verification email.");
     } finally {
       setResendLoading(false);
+    }
+  };
+
+  // NEW: Cancel pending contact email
+  const handleCancelPending = async () => {
+    if (!pendingEmail) {
+      toast.error("No pending email to cancel.");
+      return;
+    }
+
+    try {
+      setCancelLoading(true);
+      const res = await fetch("/api/auth/cancel-pending-contact", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+      });
+
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        const msg =
+          (data && (data.message || data.error)) ||
+          "Failed to cancel pending email.";
+        toast.error(msg);
+        return;
+      }
+
+      // clear local pending state and refresh userinfo
+      setPendingEmail(null);
+      setPendingEmailMasked(null);
+      setEditingPending(false);
+      setEditPendingEmail("");
+      toast.success("Pending email change cancelled.");
+      fetchUserInfo();
+    } catch (err) {
+      console.error("handleCancelPending error:", err);
+      toast.error("Network error — could not cancel pending email.");
+    } finally {
+      setCancelLoading(false);
+    }
+  };
+
+  // NEW: confirm changing the pending email (reuses handleUpdateContact)
+  const handleChangePendingConfirm = async () => {
+    const email = editPendingEmail.trim();
+    const ok = await handleUpdateContact(email);
+    if (ok) {
+      setEditingPending(false);
+      setEditPendingEmail("");
     }
   };
 
@@ -382,7 +450,9 @@ export default function VerifyModal({
         {pendingEmailMasked && (
           <div className="mb-3 flex items-center justify-center">
             <div className="inline-flex items-center gap-3 px-3 py-1 rounded-full bg-yellow-50 border border-yellow-200 text-sm">
-              <span className="font-medium text-yellow-800">{pendingEmailMasked}</span>
+              <span className="font-medium text-yellow-800">
+                {pendingEmailMasked}
+              </span>
               <span className="text-xs text-yellow-700">Unverified</span>
               <button
                 onClick={handleResendVerification}
@@ -391,6 +461,25 @@ export default function VerifyModal({
               >
                 {resendLoading ? "Resending..." : "Resend"}
               </button>
+
+              {/*
+              <button
+                onClick={() => {
+                  setEditingPending(true);
+                  setEditPendingEmail(pendingEmail || "");
+                }}
+                className="ml-2 text-xs px-2 py-1 border rounded bg-white text-gray-800"
+              >
+                Change
+              </button>
+
+              <button
+                onClick={handleCancelPending}
+                disabled={cancelLoading}
+                className="ml-2 text-xs px-2 py-1 border rounded bg-white text-gray-800"
+              >
+                {cancelLoading ? "Cancelling..." : "Cancel"}
+              </button> */}
             </div>
           </div>
         )}
@@ -409,14 +498,21 @@ export default function VerifyModal({
             <div className="mb-3">
               {userEmail ? (
                 <span className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-gray-100 text-sm text-black">
-                  <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    className="h-4 w-4"
+                    viewBox="0 0 20 20"
+                    fill="currentColor"
+                  >
                     <path d="M2.94 6.94a1.5 1.5 0 012.12 0L10 11.88l4.94-4.94a1.5 1.5 0 112.12 2.12l-6 6a1.5 1.5 0 01-2.12 0l-6-6a1.5 1.5 0 010-2.12z" />
                   </svg>
                   <span>{maskEmail(userEmail)}</span>
                   <span className="ml-2 text-xs text-gray-500">client</span>
                 </span>
               ) : (
-                <span className="text-sm text-gray-500">No client contact email available.</span>
+                <span className="text-sm text-gray-500">
+                  No client contact email available.
+                </span>
               )}
             </div>
 
@@ -480,19 +576,28 @@ export default function VerifyModal({
 
         {step === "update-email" && (
           <>
-            <p className="text-sm text-gray-800 mb-3">Using client email as the contact address.</p>
+            <p className="text-sm text-gray-800 mb-3">
+              Using client email as the contact address.
+            </p>
 
             <div className="mb-3 flex flex-wrap gap-2 items-center">
               {userEmail ? (
                 <span className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-gray-100 text-sm text-black">
-                  <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    className="h-4 w-4"
+                    viewBox="0 0 20 20"
+                    fill="currentColor"
+                  >
                     <path d="M2.94 6.94a1.5 1.5 0 012.12 0L10 11.88l4.94-4.94a1.5 1.5 0 112.12 2.12l-6 6a1.5 1.5 0 01-2.12 0l-6-6a1.5 1.5 0 010-2.12z" />
                   </svg>
                   <span>{maskEmail(userEmail)}</span>
                   <span className="ml-2 text-xs text-gray-500">current</span>
                 </span>
               ) : (
-                <span className="text-sm text-gray-500">No current contact email (login email will be used)</span>
+                <span className="text-sm text-gray-500">
+                  No current contact email (login email will be used)
+                </span>
               )}
             </div>
 
@@ -502,10 +607,43 @@ export default function VerifyModal({
                 <div>
                   <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-yellow-100 text-sm text-black">
                     <span>{pendingEmailMasked}</span>
-                    <span className="ml-2 text-xs text-yellow-700">pending verification</span>
+                    <span className="ml-2 text-xs text-yellow-700">
+                      pending verification
+                    </span>
                   </div>
                   {pendingEmail && (
-                    <div className="text-xs text-gray-500 mt-1">Pending email: {pendingEmail}</div>
+                    <div className="text-xs text-gray-500 mt-1">
+                      Pending email: {pendingEmail}
+                    </div>
+                  )}
+
+                  {/* If editing state, show inline input to change pending email */}
+                  {editingPending && (
+                    <div className="mt-2 flex gap-2 items-center text-black">
+                      <input
+                        type="text"
+                        placeholder="Enter new email"
+                        value={editPendingEmail}
+                        onChange={(e) => setEditPendingEmail(e.target.value)}
+                        className="border rounded px-3 py-1 text-sm text-black"
+                      />
+                      <button
+                        onClick={handleChangePendingConfirm}
+                        disabled={loading}
+                        className="px-3 py-1 border rounded text-sm text-black"
+                      >
+                        {loading ? "Saving..." : "Save"}
+                      </button>
+                      <button
+                        onClick={() => {
+                          setEditingPending(false);
+                          setEditPendingEmail("");
+                        }}
+                        className="px-3 py-1 border rounded text-sm text-black"
+                      >
+                        Cancel
+                      </button>
+                    </div>
                   )}
                 </div>
 
@@ -517,6 +655,29 @@ export default function VerifyModal({
                   >
                     {resendLoading ? "Resending..." : "Resend link"}
                   </button>
+
+                  {/* buttons to change or cancel */}
+                  {!editingPending && (
+                    <>
+                      <button
+                        onClick={() => {
+                          setEditingPending(true);
+                          setEditPendingEmail(pendingEmail || "");
+                        }}
+                        className="px-3 py-1 border rounded text-sm text-black"
+                      >
+                        Change
+                      </button>
+
+                      <button
+                        onClick={handleCancelPending}
+                        className="px-3 py-1 border rounded text-sm text-black"
+                        disabled={cancelLoading}
+                      >
+                        {cancelLoading ? "Cancelling..." : "Cancel pending"}
+                      </button>
+                    </>
+                  )}
                 </div>
               </div>
             )}
@@ -575,19 +736,32 @@ export default function VerifyModal({
           <div className="text-center">
             {pendingEmailMasked ? (
               <>
-                <p className="mb-4 text-gray-800">Pending contact email <strong>{pendingEmailMasked}</strong> saved — verification required.</p>
-                {pendingEmail && (
-                  <p className="mb-2 text-sm text-gray-600">Pending email: {pendingEmail}</p>
-                )}
-                <p className="mb-4 text-sm text-gray-600">Until you verify the new address via the email link, your app will continue using the current contact email (or your login email if no contact email exists).</p>
-
                 <div className="flex justify-center gap-2">
-                  <button
+                  {/* <button
                     onClick={handleResendVerification}
                     className="px-3 py-2 border rounded text-sm text-black"
                     disabled={resendLoading}
                   >
                     {resendLoading ? "Resending..." : "Resend verification"}
+                  </button> */}
+
+                  {/* expose change/cancel here as well */}
+                  {/* <button
+                    onClick={() => {
+                      setEditingPending(true);
+                      setEditPendingEmail(pendingEmail || "");
+                    }}
+                    className="px-3 py-2 border rounded text-sm text-black"
+                  >
+                    Change pending email
+                  </button> */}
+
+                  <button
+                    onClick={handleCancelPending}
+                    className="px-3 py-2 border rounded text-sm text-black"
+                    disabled={cancelLoading}
+                  >
+                    {cancelLoading ? "Cancelling..." : "Cancel pending"}
                   </button>
 
                   <button
@@ -599,10 +773,41 @@ export default function VerifyModal({
                     Close
                   </button>
                 </div>
+
+                {/* If editing is active show inline editor in the complete state as well */}
+                {editingPending && (
+                  <div className="mt-4 flex justify-center gap-2">
+                    <input
+                      type="text"
+                      className="border rounded px-3 py-1 text-sm text-black placeholder-black bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      placeholder="Enter new email"
+                      value={editPendingEmail}
+                      onChange={(e) => setEditPendingEmail(e.target.value)}
+                    />
+                    <button
+                      onClick={handleChangePendingConfirm}
+                      disabled={loading}
+                      className="px-3 py-1 border rounded text-sm text-black"
+                    >
+                      {loading ? "Saving..." : "Save"}
+                    </button>
+                    <button
+                      onClick={() => {
+                        setEditingPending(false);
+                        setEditPendingEmail("");
+                      }}
+                      className="px-3 py-1 border rounded text-sm text-black"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                )}
               </>
             ) : (
               <>
-                <p className="mb-4 text-gray-800">All set — action completed successfully.</p>
+                <p className="mb-4 text-gray-800">
+                  All set — action completed successfully.
+                </p>
                 <div className="flex justify-center gap-2">
                   <button
                     onClick={() => {
@@ -623,3 +828,200 @@ export default function VerifyModal({
 
   return createPortal(modalContent, elRef.current);
 }
+
+// ---------- Parent integration: show pending unverified email BEFORE opening the modal ----------
+// Add this component to any settings/account page to surface the pending (unverified) contact
+// email as a visible tag/banner so users know there's an unverified address before opening the modal.
+// NOTE: This file already defines `VerifyModal` above — do NOT re-import React or VerifyModal here.
+
+/*
+Usage:
+  <AccountSettings />
+
+This example shows how to render a small "ContactEmailStatus" component that fetches
+`/api/auth/userinfo` and displays a masked unverified email as a visible tag on the page (responsive).
+It provides quick actions (Resend, Cancel, Manage) and allows entering a custom email before opening
+the `VerifyModal` (so the user can use any email, not just the client/login email).
+*/
+
+import type ReactType from "react"; // dummy import for TS file-scope type-only use (no runtime import)
+
+export function ContactEmailStatus() {
+  const [pendingMasked, setPendingMasked] = React.useState<string | null>(null);
+  const [pendingRaw, setPendingRaw] = React.useState<string | null>(null);
+  const [loading, setLoading] = React.useState(false);
+  const [resendLoading, setResendLoading] = React.useState(false);
+  const [cancelLoading, setCancelLoading] = React.useState(false);
+  const [showModal, setShowModal] = React.useState(false);
+  const [manualEmail, setManualEmail] = React.useState<string>("");
+
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      try {
+        const res = await fetch("/api/auth/userinfo", {
+          credentials: "include",
+        });
+        if (!res.ok) return;
+        const data = await res.json().catch(() => ({}));
+        if (!mounted) return;
+        const raw = data?.user?.pendingContactEmail ?? null;
+        const masked = data?.user?.pendingContactEmailMasked ?? null;
+        setPendingRaw(raw);
+        setPendingMasked(masked || (raw ? maskEmail(raw) : null));
+      } catch (e) {
+        // ignore
+      }
+    })();
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  // local mask helper (kept here to avoid depending on outer scope)
+  const maskEmail = (email?: string | null) => {
+    if (!email || !email.includes("@")) return email ?? null;
+    const [local, domain] = email.split("@");
+    const visible = 2;
+    const visibleLocal = local.slice(0, Math.max(0, visible));
+    const maskedLocal =
+      visibleLocal +
+      "*".repeat(Math.max(0, local.length - visibleLocal.length));
+    return `${maskedLocal}@${domain}`;
+  };
+
+  const handleResend = async () => {
+    setResendLoading(true);
+    try {
+      const res = await fetch("/api/auth/resend-pending-contact", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+      });
+      if (!res.ok) throw new Error("Failed");
+      const data = await res.json().catch(() => ({}));
+      if (data.pendingContactEmailMasked)
+        setPendingMasked(data.pendingContactEmailMasked);
+      if (data.pendingContactEmail) setPendingRaw(data.pendingContactEmail);
+    } catch (err) {
+      console.warn("resend failed", err);
+    } finally {
+      setResendLoading(false);
+    }
+  };
+
+  const handleCancel = async () => {
+    if (!pendingRaw) return;
+    if (!confirm("Cancel pending email change?")) return; // quick safeguard
+    setCancelLoading(true);
+    try {
+      const res = await fetch("/api/auth/cancel-pending-contact", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+      });
+      if (!res.ok) throw new Error("Failed to cancel");
+      // cleared on server — update UI
+      setPendingRaw(null);
+      setPendingMasked(null);
+    } catch (err) {
+      console.warn("cancel failed", err);
+    } finally {
+      setCancelLoading(false);
+    }
+  };
+
+  if (!pendingMasked) return null; // nothing to show
+
+  return (
+    <>
+      <div className="w-full flex flex-col sm:flex-row sm:items-center sm:gap-4 gap-3">
+        <div className="flex-0">
+          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-yellow-50 border border-yellow-200 text-sm">
+            <span className="font-medium text-yellow-800">{pendingMasked}</span>
+            <span className="text-xs text-yellow-700">Unverified</span>
+          </div>
+        </div>
+
+        <div className="flex-1 flex flex-col sm:flex-row sm:items-center gap-2 w-full">
+          <input
+            type="email"
+            placeholder="Or enter a different email to verify..."
+            value={manualEmail}
+            onChange={(e) => setManualEmail(e.target.value)}
+            className="border rounded px-2 py-1 text-sm w-full sm:w-72"
+          />
+
+          <div className="flex gap-2">
+            <button
+              onClick={() => setShowModal(true)}
+              className="px-2 py-1 border rounded text-sm"
+            >
+              Manage
+            </button>
+
+            <button
+              onClick={() => {
+                setShowModal(true);
+              }}
+              disabled={resendLoading && !manualEmail}
+              className="px-2 py-1 border rounded text-sm"
+              title="Open verification modal (will use the email you entered above if any)"
+            >
+              Verify
+            </button>
+
+            <button
+              onClick={handleResend}
+              disabled={resendLoading}
+              className="px-2 py-1 border rounded text-sm"
+            >
+              {resendLoading ? "Resending..." : "Resend"}
+            </button>
+
+            <button
+              onClick={handleCancel}
+              disabled={cancelLoading}
+              className="px-2 py-1 border rounded text-sm"
+            >
+              {cancelLoading ? "Cancelling..." : "Cancel"}
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* the VerifyModal component defined above — it will reflect the pending state
+          and provide the inline-change/cancel UI. Pass the manualEmail value so the
+          modal will use it if the user wants to verify a different address. */}
+      <VerifyModal
+        show={showModal}
+        onClose={() => setShowModal(false)}
+        userEmail={manualEmail || undefined}
+        verifyForAction={"update-contact"}
+        currentPassword={""}
+        setCurrentPassword={() => {}}
+        newPassword={""}
+        setNewPassword={() => {}}
+        onVerify={() => {
+          /* optional: refresh parent state */
+        }}
+        saving={false}
+      />
+    </>
+  );
+}
+
+// Example of how you'd place it on a page:
+export function AccountSettings() {
+  return (
+    <div className="space-y-6">
+      <h2 className="text-lg font-medium">Account</h2>
+      <ContactEmailStatus />
+      {/* other account settings */}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------------
+// End of appended integration example
+// ---------------------------------------------------------------------------------

@@ -54,6 +54,8 @@ export async function DELETE(
     }
 
     if (userDoc.refreshVersion !== refreshDecoded.version) {
+      cookieStore.delete("refreshToken");
+            cookieStore.delete("authToken");
       return NextResponse.json(
         { ok: false, message: "Session revoked." },
         { status: 401 }

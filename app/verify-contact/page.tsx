@@ -86,7 +86,7 @@ export default function VerifyContactPage() {
             <div className="flex gap-2">
               <button
                 className="px-4 py-2 bg-blue-600 text-white rounded shadow"
-                onClick={() => (window.location.href = "/settings")}
+                onClick={() => (window.location.href = "/dashboard/settings")}
               >
                 Go to settings
               </button>
