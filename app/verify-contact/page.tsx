@@ -11,24 +11,22 @@ export default function VerifyContactPage() {
   const [token, setToken] = useState<string | null>(null);
 
   useEffect(() => {
-    // Parse uid & token from query string
     try {
-    const params = new URLSearchParams(window.location.search);
-      const uid = params.get("uid");
-      const token = params.get("token");
-      setUid(uid);
-      setToken(token);
-      
-   
+      const params = new URLSearchParams(window.location.search);
+      const uidParam = params.get("uid");
+      const tokenParam = params.get("token");
 
-      if (!uid || !token) {
+      setUid(uidParam);
+      setToken(tokenParam);
+
+      if (!uidParam || !tokenParam) {
         setMessage("Missing verification parameters in the URL.");
         setStatus("error");
         return;
       }
 
-      // automatically attempt verification on mount
-      void verify(uid, token);
+      // call verify with the parsed values (use the args inside verify)
+      void verify(uidParam, tokenParam);
     } catch (err) {
       setMessage("Failed to read verification link.");
       setStatus("error");
@@ -37,6 +35,9 @@ export default function VerifyContactPage() {
   }, []);
 
   const verify = async (u: string, t: string) => {
+    // prevent double submissions while loading
+    if (status === "loading") return;
+
     setStatus("loading");
     setMessage(null);
 
@@ -45,7 +46,8 @@ export default function VerifyContactPage() {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ uid, token }),
+        // IMPORTANT: use the function params (u, t) — not the state variables
+        body: JSON.stringify({ uid: u, token: t }),
       });
 
       const data = await res.json().catch(() => ({}));
