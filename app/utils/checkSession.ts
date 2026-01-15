@@ -1,137 +1,117 @@
+// app/utils/checkSession.ts
 import { cookies } from "next/headers";
-import { verifyToken, generateToken } from "@/app/utils/token";
+import { verifyToken } from "@/app/utils/token";
 import type { AuthTokenPayload } from "@/app/utils/token";
 import connectToDatabase from "./mongodb";
 import Session from "../models/Session";
 import User from "../models/User";
-
+import { evaluateTrust } from "./trustEngine";
+import redis from "./redis";
 export interface SessionCheckResult {
   auth: boolean;
   user?: AuthTokenPayload;
-  rotated?: boolean;
   clearCookies?: boolean;
-  require2FA?: boolean; // redirect to 2FA page
-  requireAdminApproval?: boolean; // block until admin approval
+  require2FA?: boolean;
+  requireAdminApproval?: boolean;
 }
 
-export async function checkSession(): Promise<SessionCheckResult> {
+/**
+ * checkSession accepts optional runtime signals:
+ *   opts.ip, opts.ua, opts.geo, opts.recentFailedLoginCount, opts.ipReputationScore
+ */
+export async function checkSession(opts?: {
+  ip?: string | null;
+  ua?: string | null;
+  geo?: { lat: number; lon: number } | null;
+  recentFailedLoginCount?: number;
+  ipReputationScore?: number | null;
+}): Promise<SessionCheckResult> {
+  const cookieStore = await cookies();
+  const authToken = cookieStore.get("authToken")?.value;
+  const refreshToken = cookieStore.get("refreshToken")?.value;
+
   try {
-    const cookieStore = await cookies();
-    const authCookie = cookieStore.get("authToken")?.value;
-    const refreshCookie = cookieStore.get("refreshToken")?.value;
-    const gen = generateToken as unknown as (
-      payload: Record<string, any>,
-      type?: "AUTH" | "REFRESH" | "APP"
-    ) => string;
+      // 2) Need refresh token
+      if (!refreshToken) {
+        cookieStore.delete("authToken");
+        cookieStore.delete("refreshToken");
+        return { auth: false, clearCookies: true };
+      }
 
-    if (!refreshCookie) {
-      cookieStore.delete("authToken");
-      cookieStore.delete("refreshToken");
-      return { auth: false, clearCookies: true };
-    }
-
-    const refreshVerify = verifyToken(refreshCookie, "REFRESH");
+    const refreshVerify = verifyToken(refreshToken, "REFRESH");
     if (!refreshVerify?.decoded) {
       cookieStore.delete("authToken");
       cookieStore.delete("refreshToken");
       return { auth: false, clearCookies: true };
     }
 
-    const decoded = refreshVerify.decoded as AuthTokenPayload;
-    if (!decoded?.uid || !decoded?.version) {
+    const decoded = refreshVerify.decoded as AuthTokenPayload | Record<string, any>;
+    if (!decoded || !decoded.uid || (decoded.version === undefined || decoded.version === null)) {
       cookieStore.delete("authToken");
       cookieStore.delete("refreshToken");
       return { auth: false, clearCookies: true };
     }
 
-    // Connect DB
+    // 3) DB checks
     await connectToDatabase();
-
-    // 1️⃣ Check global refreshVersion
-    const userDoc = await User.findById(decoded.uid)
-      .select("refreshVersion lastLogin")
-      .lean()
-      .exec();
-
+    const userDoc = await User.findById(String(decoded.uid)).select("refreshVersion lastLogin avgLoginHour").lean().exec();
     if (!userDoc) {
       cookieStore.delete("authToken");
       cookieStore.delete("refreshToken");
       return { auth: false, clearCookies: true };
     }
 
-    if (userDoc.refreshVersion !== decoded.version) {
+    const tokenVersion = typeof decoded.version === "number" ? decoded.version : Number(decoded.version);
+    const userVersion = typeof userDoc.refreshVersion === "number" ? userDoc.refreshVersion : Number(userDoc.refreshVersion);
+
+    if (!Number.isNaN(tokenVersion) && userVersion !== tokenVersion) {
       cookieStore.delete("authToken");
       cookieStore.delete("refreshToken");
       return { auth: false, clearCookies: true };
     }
 
-    // 2️⃣ Check session and fingerprint
-    const sessionDoc = await Session.findOne({
-      userId: decoded.uid,
-      sid: decoded.sid,
-      revoked: false,
-      blocked: false,
-    }).lean();
-
-    const fingerprintMismatch =
-      sessionDoc?.fingerprint !== decoded.fingerprint;
-
-    const previousLoginExists = !!userDoc.lastLogin;
-
-    if (fingerprintMismatch && previousLoginExists) {
-      // Soft signal: require 2FA
-      return { auth: false, require2FA: true };
+    // 4) Session lookup (sid may be absent -> sessionDoc null)
+    const sid = decoded.sid ?? null;
+    let sessionDoc: any | null = null;
+    if (sid) {
+      sessionDoc = await Session.findOne({
+        userId: decoded.uid,
+        sid,
+        revoked: false,
+        blocked: false,
+      }).lean().exec();
     }
 
-    if (!previousLoginExists && fingerprintMismatch) {
-      // Hard signal: block login, require admin approval
+    // 5) Trust engine - conservative: if any internal error => reject
+    const trust = await evaluateTrust({
+      decoded,
+      sessionDoc,
+      userDoc,
+      ip: opts?.ip ?? null,
+      ua: opts?.ua ?? null,
+      geo: opts?.geo ?? null,
+      recentFailedLoginCount: opts?.recentFailedLoginCount ?? 0,
+      ipReputationScore: opts?.ipReputationScore ?? null,
+    //   redisClient: redis,
+    });
+
+    if (trust.action === "allow") {
+      return { auth: true, user: decoded as AuthTokenPayload };
+    }
+    if (trust.action === "require2FA") {
+      return { auth: false, require2FA: true };
+    }
+    if (trust.action === "requireDeviceApproval") {
       return { auth: false, requireAdminApproval: true };
     }
 
-    // 3️⃣ Rotate tokens if everything is fine
-    const authPayload: AuthTokenPayload = {
-      uid: decoded.uid,
-      email: decoded.email,
-      role: decoded.role,
-      name: decoded.name,
-      company: decoded.company,
-      deviceId: decoded.deviceId,
-      version: decoded.version,
-      fingerprint: decoded.fingerprint,
-      sid: decoded.sid,
-    };
-
-    const refreshPayload = {
-      ...authPayload,
-      refreshVersion: decoded.refreshVersion,
-    };
-
-    const newAuthToken = gen(authPayload, "AUTH");
-    const newRefreshToken = gen(refreshPayload, "REFRESH");
-
-    cookieStore.set({
-      name: "authToken",
-      value: newAuthToken,
-      httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
-      sameSite: "strict",
-      path: "/",
-      maxAge: 60 * 60,
-    });
-
-    cookieStore.set({
-      name: "refreshToken",
-      value: newRefreshToken,
-      httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
-      sameSite: "strict",
-      path: "/",
-      maxAge: 7 * 24 * 60 * 60,
-    });
-
-    return { auth: true, user: authPayload, rotated: true };
+    // default reject (trust.action === "reject")
+    return { auth: false, clearCookies: true };
   } catch (err) {
     console.error("Session check error:", err);
+    // conservative fallback: clear cookies and reject
+    cookieStore.delete("authToken");
+    cookieStore.delete("refreshToken");
     return { auth: false, clearCookies: true };
   }
 }

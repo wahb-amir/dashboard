@@ -1,4 +1,3 @@
-// app/api/auth/login/route.ts
 import { NextResponse as Response, NextRequest } from "next/server";
 import validator from "validator";
 import connectToMongoose from "@/app/utils/mongodb";
@@ -11,6 +10,7 @@ import redis from "@/app/utils/redis";
 import crypto from "crypto";
 import { v4 as uuidv4 } from "uuid";
 import { recordSuccessfulLogin } from "@/app/utils/session";
+
 type LoginBody = {
   email?: unknown;
   password?: unknown;
@@ -139,30 +139,47 @@ export async function POST(request: NextRequest): Promise<Response> {
     // success — clear attempts
     await safeDel(key);
 
-    // -------------------- create session & tokens --------------------
+    // -------------------- create or reuse session & tokens --------------------
     const userAgent =
       request.headers.get("user-agent")?.slice(0, 1024) || "unknown_ua";
 
     const fingerprint = makeFingerprint(userAgent, ip);
-    const sid = uuidv4();
 
-    const sessionDoc = new Session({
+    // try to find an existing active session for this user + fingerprint
+    let sessionDoc = await Session.findOne({
       userId: user._id,
-      sid,
-      userAgent,
-      ip,
-      os: undefined,
-      browser: undefined,
-      deviceName: undefined,
       fingerprint,
       revoked: false,
       blocked: false,
-      createdAt: new Date(),
-      lastUsedAt: new Date(),
-      expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), // 7 days
-    });
-    await recordSuccessfulLogin(user._id.toString(), sid, fingerprint, ip, userAgent);
-    // access token (short-lived) — include sid optionally
+      expiresAt: { $gt: new Date() },
+    }).exec();
+
+    let sid: string;
+    if (sessionDoc) {
+      // reuse session
+      sid = sessionDoc.sid;
+      sessionDoc.lastUsedAt = new Date();
+    } else {
+      // create new session
+      sid = uuidv4();
+      sessionDoc = new Session({
+        userId: user._id,
+        sid,
+        userAgent,
+        ip,
+        os: undefined,
+        browser: undefined,
+        deviceName: undefined,
+        fingerprint,
+        revoked: false,
+        blocked: false,
+        createdAt: new Date(),
+        lastUsedAt: new Date(),
+        expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), // 7 days
+      });
+    }
+
+    // generate tokens (include fingerprint and sid with consistent naming)
     const clientAuthToken = generateToken(
       {
         uid: user._id.toString(),
@@ -175,24 +192,26 @@ export async function POST(request: NextRequest): Promise<Response> {
       { expiresIn: "1h" }
     );
 
-    // refresh token payload includes sid + fingerprint hash
-    const refreshToken = generateToken(
-      {
-        uid: user._id.toString(),
-        role: user.role || "client",
-        name: user.name || "",
-        company: user.company || "",
-        sid,
-        fp: fingerprint,
-        version: user.refreshVersion,
-      },
-      "REFRESH",
-      { expiresIn: "7d" }
-    );
+    const refreshTokenPayload = {
+      uid: user._id.toString(),
+      role: user.role || "client",
+      name: user.name || "",
+      company: user.company || "",
+      sid,
+      fingerprint, // consistent claim name
+      version: user.refreshVersion,
+    };
 
-    // store only hash of refresh token
+    const refreshToken = generateToken(refreshTokenPayload, "REFRESH", {
+      expiresIn: "7d",
+    });
+
+    // store only hash of refresh token (overwrite existing session's hash if reusing)
     sessionDoc.refreshTokenHash = hashToken(refreshToken);
     await sessionDoc.save();
+
+    // record successful login history (keeps a history log; doesn't create additional sessions)
+    await recordSuccessfulLogin(user._id.toString(), sid, fingerprint, ip, userAgent);
 
     const userId = user._id.toString();
     const res = Response.json(

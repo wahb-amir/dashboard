@@ -271,10 +271,6 @@ UserSchema.methods.verifyPendingContactEmail = async function (
   return true;
 };
 
-// TTL index examples removed because TTL on a date field will delete the whole document
-// if you intended to auto-delete codes, prefer application-level cleanup.
-// Keep the indexes you need (non-TTL) here.
-UserSchema.index({ email: 1 });
 
 // Prevent model recompilation in dev/hot-reload environments
 const User: Model<IUser> =

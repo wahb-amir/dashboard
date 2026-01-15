@@ -8,7 +8,7 @@ import { verifyToken, generateToken } from "@/app/utils/token";
 import redis from "@/app/utils/redis";
 import crypto from "crypto";
 import { v4 as uuidv4 } from "uuid";
-import { recordSuccessfulLogin } from "@/app/utils/session";
+
 type RegisterBody = {
   name?: unknown;
   email?: unknown;
@@ -56,6 +56,51 @@ function makeFingerprint(userAgent: string, ip: string) {
 
 function hashToken(token: string) {
   return crypto.createHash("sha256").update(token).digest("hex");
+}
+
+/**
+ * Upsert a single lastLogin record per fingerprint.
+ * - If a lastLogin entry with the fingerprint exists, update its timestamp/ip/userAgent/deviceId.
+ * - Otherwise push a new entry.
+ */
+async function upsertLastLogin(
+  userId: string,
+  deviceId: string,
+  fingerprint: string,
+  ip: string,
+  userAgent?: string
+) {
+  // try to update an existing lastLogin entry for this fingerprint
+  const updateResult = await User.updateOne(
+    { _id: userId, "lastLogin.fingerprint": fingerprint },
+    {
+      $set: {
+        "lastLogin.$.timestamp": new Date(),
+        "lastLogin.$.ip": ip,
+        "lastLogin.$.userAgent": userAgent || "",
+        "lastLogin.$.deviceId": deviceId,
+      },
+    }
+  ).exec();
+
+  if (updateResult.modifiedCount === 0 && updateResult.matchedCount === 0) {
+    // no existing entry — push a new one
+    await User.updateOne(
+      { _id: userId },
+      {
+        $push: {
+          lastLogin: {
+            deviceId,
+            fingerprint,
+            ip,
+            userAgent,
+            timestamp: new Date(),
+          },
+        },
+      },
+      { upsert: false }
+    ).exec();
+  }
 }
 
 // -------------------- route --------------------
@@ -193,7 +238,6 @@ export async function POST(request: NextRequest): Promise<Response> {
     }
 
     // create and save user (pre-save hook hashes password)
-
     const userDoc = new User({
       name: name.trim(),
       email: emailLower,
@@ -204,7 +248,6 @@ export async function POST(request: NextRequest): Promise<Response> {
     });
 
     const saved = await userDoc.save();
-
     const newUserId = saved._id?.toString();
 
     await Promise.all([
@@ -212,7 +255,7 @@ export async function POST(request: NextRequest): Promise<Response> {
       keyEmail ? safeDel(keyEmail) : Promise.resolve(),
     ]);
 
-    // -------------------- create session & tokens --------------------
+    // -------------------- create or reuse session & tokens --------------------
     // device info
     const userAgent =
       request.headers.get("user-agent")?.slice(0, 1024) || "unknown_ua";
@@ -220,34 +263,40 @@ export async function POST(request: NextRequest): Promise<Response> {
     // compute fingerprint (HMAC of UA + IP using server secret)
     const fingerprint = makeFingerprint(userAgent, ip);
 
-    // session id
-    const sid = uuidv4();
-
-    // create session document (store full device info and hashed refresh token later)
-    const sessionDoc = new Session({
+    // try to find existing session for this (new) user + fingerprint (unlikely but safe)
+    let sessionDoc = await Session.findOne({
       userId: saved._id,
-      sid,
-      userAgent,
-      ip, // consider hashing IP in DB for extra privacy if desired
-      os: undefined,
-      browser: undefined,
-      deviceName: undefined,
       fingerprint,
       revoked: false,
       blocked: false,
-      createdAt: new Date(),
-      lastUsedAt: new Date(),
-      expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), // 7 days
-    });
-    await recordSuccessfulLogin(
-      newUserId,
-      sid, // use session id as deviceId
-      fingerprint, // computed HMAC fingerprint
-      ip,
-      userAgent
-    );
-    // generate tokens
-    // access token (short-lived) — include sid optionally
+      expiresAt: { $gt: new Date() },
+    }).exec();
+
+    let sid: string;
+    if (sessionDoc) {
+      // reuse
+      sid = sessionDoc.sid;
+      sessionDoc.lastUsedAt = new Date();
+    } else {
+      sid = uuidv4();
+      sessionDoc = new Session({
+        userId: saved._id,
+        sid,
+        userAgent,
+        ip,
+        os: undefined,
+        browser: undefined,
+        deviceName: undefined,
+        fingerprint,
+        revoked: false,
+        blocked: false,
+        createdAt: new Date(),
+        lastUsedAt: new Date(),
+        expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), // 7 days
+      });
+    }
+
+    // generate tokens (consistent claim names)
     const authToken = generateToken(
       {
         uid: newUserId,
@@ -260,13 +309,12 @@ export async function POST(request: NextRequest): Promise<Response> {
       { expiresIn: "1h" }
     );
 
-    // refresh token payload MUST include sid + fingerprintHash (not raw UA/ip)
     const refreshTokenPayload = {
       uid: newUserId,
       role: "client",
       sid,
-      fp: fingerprint,
-      refreshVersion: saved.refreshVersion,
+      fingerprint,
+      version: saved.refreshVersion,
     };
 
     const refreshToken = generateToken(refreshTokenPayload, "REFRESH", {
@@ -276,6 +324,9 @@ export async function POST(request: NextRequest): Promise<Response> {
     // store only the hash of the refresh token in session doc
     sessionDoc.refreshTokenHash = hashToken(refreshToken);
     await sessionDoc.save();
+
+    // record first/previous login as an upsert into lastLogin so new accounts are not flagged
+    await upsertLastLogin(newUserId!, sid, fingerprint, ip, userAgent);
 
     // set cookies on response
     const res = Response.json(
