@@ -1,8 +1,8 @@
 // app/utils/trustEngine.ts
 import type { AuthTokenPayload } from "@/app/utils/token";
-import TrustEvent from "@/app/models/TrustEvent";
 import crypto from "crypto";
-import { upsertDeviceForUser, devicesSnapshotForUser } from "@/app/services/deviceService";
+import mongoose from "mongoose";
+import SessionModel from "@/app/models/Session";
 
 export type TrustAction = "allow" | "require2FA" | "requireDeviceApproval" | "reject";
 export interface TrustResult {
@@ -15,19 +15,20 @@ const CONFIG = {
   START_SCORE: 0,
   POINTS: {
     fingerprintMatch: 40,
+    fingerprintMatchPartial: Math.round(40 * 0.6),
     geoClose: 30,
     knownSid: 20,
     goodIpReputation: 20,
     timeMatch: 10,
     noRecentFailedLogins: 10,
-    deviceFamiliarity: 10,
+    sessionFamiliarity: 10,
   },
   DECISIONS: { allow: 80, require2FA: 50, requireDeviceApproval: 30 },
   GEO_KM_SAFE: 300,
-  REDIS_TTL_SECONDS: 60 * 5,
-  PERSIST_EVENT_THRESHOLD: 10,
-  RESET_AFTER_PERSIST: true,
-  FP_CACHE_TTL_SECONDS: 15 * 60, // 15 minutes for per-sid fp cache
+  SESSION_CACHE_TTL_SECONDS: 15 * 60, // 15 minutes
+  FP_CACHE_TTL_SECONDS: 15 * 60, // 15 minutes per-session fp cache
+  FP_SIMILARITY_FULL: 0.9,
+  FP_SIMILARITY_PARTIAL: 0.7,
 };
 
 function clamp(n: number) {
@@ -59,32 +60,44 @@ function deviceFromUA(ua: string | null): "mobile" | "tablet" | "desktop" | "unk
   return "unknown";
 }
 
+// simple hex-similarity: fraction of equal characters
+function hexSimilarity(a: string, b: string) {
+  if (!a || !b) return 0;
+  if (a.length !== b.length) {
+    const min = Math.min(a.length, b.length);
+    let same = 0;
+    for (let i = 0; i < min; i++) if (a[i] === b[i]) same++;
+    return same / Math.max(a.length, b.length);
+  }
+  let same = 0;
+  for (let i = 0; i < a.length; i++) if (a[i] === b[i]) same++;
+  return same / a.length;
+}
+
 /**
- * evaluateTrust:
- * - decoded: token payload (we will NOT trust token.fp)
- * - sessionDoc: server-side session (may contain deviceId or stored fingerprint)
- * - userDoc: user doc from DB (may be null)
- * - currentFingerprint: fingerprint computed from the current request (client JS or headers) -- MUST be provided by caller
- * - ephemeral signals: ip, geo (lat/lon), ua, recentFailedLoginCount, ipReputationScore
- * - redisClient: optional redis client for fast aggregation (recommended)
+ * Read-only trust engine using only Session model + Redis caching for session snapshot.
+ *
+ * options.decoded: token payload (must include sessionId or sid)
+ * options.currentFingerprint: fingerprint string computed on client (required to use fp checks)
+ * options.redisClient: optional ioredis client (used to cache session snapshot & fp)
+ *
+ * Returns { score, action, reasons } — no DB writes except Redis caching.
  */
 export async function evaluateTrust(options: {
   decoded: AuthTokenPayload | Record<string, any>;
-  sessionDoc: any | null;
-  userDoc: any | null;
-  currentFingerprint?: string | null; // NEW: fingerprint from current request (not from token)
+  userDoc?: any | null; // optional, for geo/time history
+  currentFingerprint?: string | null;
   ip?: string | null;
   geo?: { lat: number; lon: number } | null;
   ua?: string | null;
   now?: Date;
   recentFailedLoginCount?: number;
   ipReputationScore?: number | null;
-  redisClient?: any; // ioredis or similar
+  redisClient?: any; // ioredis - optional, used for caching only
 }): Promise<TrustResult> {
   const {
     decoded,
-    sessionDoc,
-    userDoc,
+    userDoc = null,
     currentFingerprint = null,
     ip = null,
     geo = null,
@@ -99,182 +112,141 @@ export async function evaluateTrust(options: {
     let score = CONFIG.START_SCORE;
     const reasons: string[] = [];
 
-    // NOTE: we ignore any fingerprint that might be embedded in the token.
-    // Caller MUST provide currentFingerprint computed from the current request.
-    const tokenSid = (decoded as any).sid ?? null;
+    // prefer ObjectId sessionId in token; fallback to sid string
+    const tokenSessionId = (decoded as any).sessionId ?? (decoded as any).sid ?? null;
     const uid = (decoded as any).uid ?? (decoded as any).sub ?? null;
     const hour = now.getHours();
-    const device = deviceFromUA(ua);
+    const sessionDeviceType = deviceFromUA(ua);
 
-    // compute hash of current fingerprint (if provided)
+    // compute current fingerprint hash (sha256) if provided
     const currentFpHash = currentFingerprint
       ? crypto.createHash("sha256").update(String(currentFingerprint)).digest("hex")
       : null;
 
-    if ((decoded as any).fingerprint || (decoded as any).fp) {
-      // token contained a fingerprint — ignore it and add a reason for visibility
-      reasons.push("token_fp_ignored");
-    }
+    // never trust fingerprint in token
+    if ((decoded as any).fingerprint || (decoded as any).fp) reasons.push("token_fp_ignored");
 
-    const redisKey = uid ? `trust:${String(uid)}` : null;
-    let redisAgg: Record<string, any> | null = null;
-    let eventCount = 0;
-    let cachedSidFp: string | null = null;
-
-    try {
-      if (redisClient && redisKey) {
-        // Use currentFpHash (not token fp) for Redis aggregation if available.
-        const fpField = currentFpHash ? `fp:${currentFpHash}` : "fp:none";
-        const ops: Promise<any>[] = [];
-
-        ops.push(redisClient.hincrby(redisKey, "eventCount", 1));
-        ops.push(redisClient.hincrby(redisKey, `dev:${device}`, 1));
-        if (currentFpHash) ops.push(redisClient.hincrby(redisKey, fpField, 1));
-        ops.push(redisClient.hincrby(redisKey, "sumLoginHour", hour));
-        ops.push(redisClient.hincrby(redisKey, "loginCount", 1));
-        if (ip) ops.push(redisClient.hset(redisKey, "lastIp", ip));
-        if (tokenSid) ops.push(redisClient.hset(redisKey, "lastSid", tokenSid));
-        if (ua) ops.push(redisClient.hset(redisKey, "lastUa", ua));
-        if (geo) {
-          ops.push(redisClient.hset(redisKey, "lastLat", `${geo.lat}`));
-          ops.push(redisClient.hset(redisKey, "lastLon", `${geo.lon}`));
-        }
-        // keep the user aggregation short-lived
-        ops.push(redisClient.expire(redisKey, CONFIG.REDIS_TTL_SECONDS));
-
-        await Promise.all(ops);
-
-        // also try to read a cached fp for this sid (fast path)
-        if (tokenSid) {
+    // ===== read cache: trust:session:{sessionId} =====
+    let sessionCached: any = null;
+    const sessionCacheKey = tokenSessionId ? `trust:session:${String(tokenSessionId)}` : null;
+    if (redisClient && sessionCacheKey) {
+      try {
+        const raw = await redisClient.get(sessionCacheKey);
+        if (raw) {
           try {
-            const val = await redisClient.get(`trust:fp:${tokenSid}`);
-            if (val) cachedSidFp = String(val);
-          } catch (e) {
-            // ignore read error, we'll fall back to DB
-            cachedSidFp = null;
+            sessionCached = JSON.parse(raw);
+          } catch (err) {
+            sessionCached = null;
           }
         }
-
-        const [
-          evCountStr,
-          sumHourStr,
-          loginCountStr,
-          lastLat,
-          lastLon,
-          devMobile,
-          devTablet,
-          devDesktop,
-          fpCountStr,
-          lastSidVal,
-        ] = await Promise.all([
-          redisClient.hget(redisKey, "eventCount"),
-          redisClient.hget(redisKey, "sumLoginHour"),
-          redisClient.hget(redisKey, "loginCount"),
-          redisClient.hget(redisKey, "lastLat"),
-          redisClient.hget(redisKey, "lastLon"),
-          redisClient.hget(redisKey, "dev:mobile"),
-          redisClient.hget(redisKey, "dev:tablet"),
-          redisClient.hget(redisKey, "dev:desktop"),
-          currentFpHash ? redisClient.hget(redisKey, `fp:${currentFpHash}`) : Promise.resolve(null),
-          redisClient.hget(redisKey, "lastSid"),
-        ]);
-
-        eventCount = evCountStr ? parseInt(evCountStr as string, 10) || 0 : 0;
-        const sumHour = sumHourStr ? parseInt(sumHourStr as string, 10) || 0 : 0;
-        const loginCount = loginCountStr ? parseInt(loginCountStr as string, 10) || 0 : 0;
-        const avgLoginHour = loginCount > 0 ? Math.round(sumHour / loginCount) : null;
-
-        redisAgg = {
-          eventCount,
-          avgLoginHour,
-          lastLat: lastLat ?? null,
-          lastLon: lastLon ?? null,
-          devices: {
-            mobile: devMobile ? parseInt(devMobile as any, 10) || 0 : 0,
-            tablet: devTablet ? parseInt(devTablet as any, 10) || 0 : 0,
-            desktop: devDesktop ? parseInt(devDesktop as any, 10) || 0 : 0,
-          },
-          fpCount: fpCountStr ? parseInt(fpCountStr as any, 10) || 0 : 0,
-          lastSid: lastSidVal ?? null,
-        };
+      } catch (e) {
+        sessionCached = null;
       }
-    } catch (redisErr) {
-      console.log("Redis error in trust engine (falling back):", redisErr);
-      redisAgg = null;
-      cachedSidFp = null;
     }
 
-    // --- Lookup Device doc properly (server-side) ---
-    // Try to find the device via server-session linkage (preferred), then by current fingerprint hash
-    let deviceDoc: any = null;
-    try {
-      // If sessionDoc stores a deviceId, prefer that lookup (server-side trusted)
-      if (sessionDoc && sessionDoc.deviceId) {
-        // up to your Device model to index by deviceId
-        const DeviceModel = (await import("@/app/models/Device")).default;
-        deviceDoc = await DeviceModel.findOne({ userId: uid, deviceId: sessionDoc.deviceId }).exec();
+    // ===== fetch session from DB if cache miss (read-only) =====
+    let sessionDoc: any = sessionCached?.session ?? null;
+    if (!sessionDoc) {
+      if (!tokenSessionId) {
+        reasons.push("no_session_token");
+        return { score: 0, action: "requireDeviceApproval", reasons };
       }
 
-      // If not found and current fingerprint hash exists, try fingerprint lookup (persistent device)
-      if (!deviceDoc && currentFpHash) {
-        const DeviceModel = (await import("@/app/models/Device")).default;
-        deviceDoc = await DeviceModel.findOne({ userId: uid, fingerprintHash: currentFpHash }).exec();
+      // validate object id before DB search (fast fail)
+      try {
+        if (mongoose.Types.ObjectId.isValid(String(tokenSessionId))) {
+          sessionDoc = await SessionModel.findById(String(tokenSessionId)).lean().exec();
+        } else {
+          // fallback: treat as sid string
+          sessionDoc = await SessionModel.findOne({ sid: String(tokenSessionId) }).lean().exec();
+        }
+      } catch (e) {
+        sessionDoc = null;
       }
 
-      // If still not found, and sessionDoc has a server-side stored fingerprint (not token), try that
-      if (!deviceDoc && sessionDoc && sessionDoc.fingerprint) {
-        const DeviceModel = (await import("@/app/models/Device")).default;
-        const sFpHash = crypto.createHash("sha256").update(String(sessionDoc.fingerprint)).digest("hex");
-        deviceDoc = await DeviceModel.findOne({ userId: uid, fingerprintHash: sFpHash }).exec();
+      // cache fetched session (lightweight snapshot) if redis available
+      if (sessionDoc && redisClient && sessionCacheKey) {
+        try {
+          const sessionSnapshot: any = {
+            _id: sessionDoc._id,
+            sid: sessionDoc.sid,
+            userId: sessionDoc.userId,
+            fingerprint: sessionDoc.fingerprint ?? null,
+            fingerprintHash: sessionDoc.fingerprint ? crypto.createHash("sha256").update(String(sessionDoc.fingerprint)).digest("hex") : null,
+            revoked: !!sessionDoc.revoked,
+            blocked: !!sessionDoc.blocked,
+            lastUsedAt: sessionDoc.lastUsedAt ?? null,
+            createdAt: sessionDoc.createdAt ?? null,
+          };
+          await redisClient.set(sessionCacheKey, JSON.stringify({ session: sessionSnapshot }), "EX", CONFIG.SESSION_CACHE_TTL_SECONDS);
+          // optionally store per-session fp cache if session has fp
+          if (sessionSnapshot.fingerprintHash) {
+            await redisClient.set(`trust:fp:${String(tokenSessionId)}`, sessionSnapshot.fingerprintHash, "EX", CONFIG.FP_CACHE_TTL_SECONDS);
+          }
+          // reuse sessionDoc as snapshot (so later logic reads same shape)
+          sessionDoc = sessionSnapshot;
+        } catch (e) {
+          // caching failure non-fatal
+        }
       }
-
-      // If still not found, we will rely on upsertDeviceForUser to create a persistent device record (below)
-    } catch (devLookupErr) {
-      console.log("Device lookup error:", devLookupErr);
-      deviceDoc = null;
     }
 
-    // --- Update/create Device doc (persistent) ---
-    try {
-      // We pass the currentFingerprint (not token fp) to upsert. upsertDeviceForUser will
-      // create a Device doc if none found. We pass redisAgg so it can optimize writes.
-      const persisted = await upsertDeviceForUser({
-        userId: uid,
-        fingerprint: currentFingerprint ?? null,
-        ua,
-        deviceType: device,
-        ip,
-        now,
-        redisAgg,
-        shouldPersistToDb: !!redisAgg && eventCount >= CONFIG.PERSIST_EVENT_THRESHOLD,
-      });
-      // If upsert created/returned a device doc and we didn't have one earlier, use it
-      if (!deviceDoc && persisted) deviceDoc = persisted;
-    } catch (devErr) {
-      console.log("Device upsert error:", devErr);
+    // if still no session -> require admin/device approval
+    if (!sessionDoc) {
+      reasons.push("no_session");
+      return { score: 0, action: "requireDeviceApproval", reasons };
     }
 
-    // --- scoring logic (use DB/cached fp, NOT token fp) ---
-    // fingerprintMatch: true only if deviceDoc.fingerprintHash === currentFpHash OR cachedSidFp matches
-    let fingerprintMatched = false;
-    if (deviceDoc && currentFpHash && deviceDoc.fingerprintHash === currentFpHash) {
-      fingerprintMatched = true;
-      reasons.push("fingerprint_match");
-      score += CONFIG.POINTS.fingerprintMatch;
-    } else if (cachedSidFp && currentFpHash && cachedSidFp === currentFpHash) {
-      // fast path: cached per-sid fp match
-      fingerprintMatched = true;
-      reasons.push("fingerprint_match_cached");
-      score += CONFIG.POINTS.fingerprintMatch;
+    // revoked or blocked session -> immediate reject (clear cookies)
+    if (sessionDoc.revoked) {
+      reasons.push("session_revoked");
+      return { score: 0, action: "reject", reasons };
+    }
+    if (sessionDoc.blocked) {
+      reasons.push("session_blocked");
+      return { score: 0, action: "reject", reasons };
+    }
+
+    // ===== trusted fingerprint source (session.fingerprintHash or cached trust:fp) =====
+    let trustedFpHash: string | null = null;
+
+    if (sessionDoc.fingerprintHash) {
+      trustedFpHash = sessionDoc.fingerprintHash;
+    } else if (sessionDoc.fingerprint) {
+      // if snapshot had raw fingerprint, hash it
+      trustedFpHash = crypto.createHash("sha256").update(String(sessionDoc.fingerprint)).digest("hex");
+    } else if (redisClient && tokenSessionId) {
+      try {
+        const sidFp = await redisClient.get(`trust:fp:${String(tokenSessionId)}`);
+        if (sidFp) trustedFpHash = String(sidFp);
+      } catch (e) {
+        trustedFpHash = null;
+      }
     } else {
-      reasons.push("no_fp_match");
+      trustedFpHash = null;
     }
 
-    // known session id
-    const sidMatch =
-      (!!sessionDoc && tokenSid && sessionDoc.sid === tokenSid) ||
-      (redisAgg && (redisAgg as any).lastSid && tokenSid && (redisAgg as any).lastSid === tokenSid);
+    // ===== fuzzy fingerprint comparison (server-side trusted vs current request) =====
+    if (currentFpHash && trustedFpHash) {
+      const sim = hexSimilarity(trustedFpHash, currentFpHash);
+      if (sim >= CONFIG.FP_SIMILARITY_FULL) {
+        score += CONFIG.POINTS.fingerprintMatch;
+        reasons.push("fingerprint_match");
+      } else if (sim >= CONFIG.FP_SIMILARITY_PARTIAL) {
+        score += CONFIG.POINTS.fingerprintMatchPartial;
+        reasons.push("fingerprint_match_partial");
+      } else {
+        reasons.push("no_fp_match");
+      }
+    } else if (currentFpHash && !trustedFpHash) {
+      reasons.push("no_fp_stored");
+    } else {
+      reasons.push("currentFp_missing");
+    }
 
+    // ===== known session id reward (sessionDoc._id or sid authoritative) =====
+    const sidMatch =
+      String(sessionDoc._id) === String(tokenSessionId) || String(sessionDoc.sid) === String(tokenSessionId);
     if (sidMatch) {
       score += CONFIG.POINTS.knownSid;
       reasons.push("known_sid");
@@ -282,14 +254,11 @@ export async function evaluateTrust(options: {
       reasons.push("unknown_sid");
     }
 
-    // geo check (same as before)
+    // ===== geo check (use userDoc.lastLogin as fallback for user's last geo) =====
     try {
       let lastLat: number | null = null;
       let lastLon: number | null = null;
-      if (redisAgg && redisAgg.lastLat && redisAgg.lastLon) {
-        lastLat = Number(redisAgg.lastLat);
-        lastLon = Number(redisAgg.lastLon);
-      } else if (userDoc && Array.isArray(userDoc.lastLogin) && userDoc.lastLogin.length > 0) {
+      if (userDoc && Array.isArray(userDoc.lastLogin) && userDoc.lastLogin.length > 0) {
         const last = userDoc.lastLogin[userDoc.lastLogin.length - 1];
         if (typeof last.lat === "number" && typeof last.lon === "number") {
           lastLat = last.lat;
@@ -301,7 +270,7 @@ export async function evaluateTrust(options: {
         const dist = haversineKm([lastLat, lastLon], [geo.lat, geo.lon]);
         if (dist <= CONFIG.GEO_KM_SAFE) {
           score += CONFIG.POINTS.geoClose;
-          reasons.push(`geo_close_${Math.round(dist)}km`);
+          reasons.push("geo_close");
         } else {
           reasons.push(`geo_jump_${Math.round(dist)}km`);
         }
@@ -312,7 +281,7 @@ export async function evaluateTrust(options: {
       reasons.push("geo_calc_error");
     }
 
-    // ip reputation
+    // ===== ip reputation =====
     if (typeof ipReputationScore === "number") {
       if (ipReputationScore >= 60) {
         score += CONFIG.POINTS.goodIpReputation;
@@ -324,11 +293,10 @@ export async function evaluateTrust(options: {
       reasons.push("no_ip_reputation");
     }
 
-    // time-of-day similarity
+    // ===== time-of-day similarity (use userDoc.avgLoginHour if available) =====
     try {
       let avgHour: number | null = null;
-      if (redisAgg && redisAgg.avgLoginHour !== null) avgHour = redisAgg.avgLoginHour as number;
-      else if (userDoc && typeof userDoc.avgLoginHour === "number") avgHour = Math.round(userDoc.avgLoginHour);
+      if (userDoc && typeof userDoc.avgLoginHour === "number") avgHour = Math.round(userDoc.avgLoginHour);
 
       if (avgHour !== null) {
         const diff = Math.abs(hour - avgHour);
@@ -345,7 +313,7 @@ export async function evaluateTrust(options: {
       reasons.push("time_check_error");
     }
 
-    // recent failed logins
+    // ===== recent failed logins =====
     if (recentFailedLoginCount <= 1) {
       score += CONFIG.POINTS.noRecentFailedLogins;
       reasons.push("no_recent_failed_logins");
@@ -353,108 +321,72 @@ export async function evaluateTrust(options: {
       reasons.push(`recent_failed_${recentFailedLoginCount}`);
     }
 
-    // device familiarity (combine redisAgg, userDoc.devices, deviceDoc.seenCount)
+    // ===== session familiarity (did we see this session before?) =====
     try {
-      let deviceSeen = false;
-      if (redisAgg) {
-        const devCounts = redisAgg.devices;
-        if (devCounts && devCounts[device] && Number(devCounts[device]) > 1) deviceSeen = true;
-      } else if (userDoc && userDoc.devices && typeof userDoc.devices[device] === "number" && userDoc.devices[device] > 1) {
-        deviceSeen = true;
-      }
-      if (deviceDoc && (deviceDoc.seenCount || 0) > 1) deviceSeen = true;
-
-      if (deviceSeen) {
-        score += CONFIG.POINTS.deviceFamiliarity;
-        reasons.push(`device_familiar_${device}`);
+      if (sessionDoc.lastUsedAt) {
+        score += CONFIG.POINTS.sessionFamiliarity;
+        reasons.push("session_familiar");
       } else {
-        reasons.push(`device_new_${device}`);
+        reasons.push("session_new");
       }
     } catch (e) {
-      reasons.push("device_check_error");
+      reasons.push("session_check_error");
     }
 
     score = clamp(score);
 
+    // decide action
     let action: TrustAction = "reject";
     if (score >= CONFIG.DECISIONS.allow) action = "allow";
     else if (score >= CONFIG.DECISIONS.require2FA) action = "require2FA";
     else if (score >= CONFIG.DECISIONS.requireDeviceApproval) action = "requireDeviceApproval";
     else action = "reject";
 
-    // Device policy overrides (blocked/revoked)
-    try {
-      if (deviceDoc) {
-        if (deviceDoc.blocked) {
-          action = "reject";
-          reasons.push("device_blocked");
-        } else if (deviceDoc.revoked) {
-          if (action === "allow") action = "requireDeviceApproval";
-          reasons.push("device_revoked");
-        }
-      }
-    } catch (e) {
-      console.log("device policy check failed:", e);
+    // ===== final overrides: revoked/blocked check already done above for session; repeat safety check from cache if present =====
+    if (sessionDoc && sessionDoc.revoked) {
+      action = "reject";
+      if (!reasons.includes("session_revoked")) reasons.push("session_revoked");
+    }
+    if (sessionDoc && sessionDoc.blocked) {
+      action = "reject";
+      if (!reasons.includes("session_blocked")) reasons.push("session_blocked");
     }
 
-    // Cache the current fingerprint hash in Redis per-SID for a fast future check
-    try {
-      if (redisClient && tokenSid && currentFpHash) {
-        // store simple string key per sid (expires after FP_CACHE_TTL_SECONDS)
-        await redisClient.set(`trust:fp:${tokenSid}`, currentFpHash, "EX", CONFIG.FP_CACHE_TTL_SECONDS);
-      }
-    } catch (e) {
-      // caching failure shouldn't block evaluation
-      console.log("Failed to cache fp in redis:", e);
-    }
-
-    // --- Persistence / DB summary write ---
-    if (redisAgg && eventCount >= CONFIG.PERSIST_EVENT_THRESHOLD) {
+    // ===== cache per-session fp (for faster future checks) =====
+    if (redisClient && tokenSessionId && currentFpHash) {
       try {
-        const devicesSnapshot = await devicesSnapshotForUser(uid);
-        await TrustEvent.create({
-          userId: uid,
-          sid: tokenSid ?? null,
-          ip,
-          ua,
-          score,
-          reasons,
-          createdAt: new Date(),
-        });
-
-        if (CONFIG.RESET_AFTER_PERSIST && redisClient && redisKey) {
-          try {
-            await Promise.all([
-              redisClient.hset(redisKey, "eventCount", 0),
-              redisClient.hset(redisKey, "sumLoginHour", 0),
-              redisClient.hset(redisKey, "loginCount", 0),
-            ]);
-          } catch (e) {
-            console.log("Redis reset after persist failed:", e);
-          }
-        }
-      } catch (dbErr) {
-        console.log("Failed to persist summarized TrustEvent:", dbErr);
-      }
-    } else if (!redisAgg) {
-      try {
-        await TrustEvent.create({
-          userId: uid,
-          sid: tokenSid ?? null,
-          ip,
-          ua,
-          score,
-          reasons,
-          createdAt: new Date(),
-        });
+        await redisClient.set(`trust:fp:${String(tokenSessionId)}`, currentFpHash, "EX", CONFIG.FP_CACHE_TTL_SECONDS);
       } catch (e) {
-        console.log("Fallback TrustEvent logging failed:", e);
+        // ignore cache write failure
+      }
+    }
+
+    // ===== also refresh session cache TTL if it exists (best-effort) =====
+    if (redisClient && sessionCacheKey) {
+      try {
+        // if we cached earlier, re-set TTL by rewriting current snapshot (best-effort)
+        const curSnapshot = {
+          session: {
+            _id: sessionDoc._id,
+            sid: sessionDoc.sid,
+            userId: sessionDoc.userId,
+            fingerprint: sessionDoc.fingerprint ?? null,
+            fingerprintHash: trustedFpHash ?? null,
+            revoked: !!sessionDoc.revoked,
+            blocked: !!sessionDoc.blocked,
+            lastUsedAt: sessionDoc.lastUsedAt ?? null,
+            createdAt: sessionDoc.createdAt ?? null,
+          },
+        };
+        await redisClient.set(sessionCacheKey, JSON.stringify(curSnapshot), "EX", CONFIG.SESSION_CACHE_TTL_SECONDS);
+      } catch (e) {
+        // ignore
       }
     }
 
     return { score, action, reasons };
   } catch (err) {
-    console.log("Unexpected error in trust engine:", err);
+    console.log("Unexpected error in trust engine (session-only):", err);
     return { score: 0, action: "reject", reasons: ["trust_engine_error"] };
   }
 }

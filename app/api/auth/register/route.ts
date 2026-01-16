@@ -272,13 +272,14 @@ export async function POST(request: NextRequest): Promise<Response> {
       expiresAt: { $gt: new Date() },
     }).exec();
 
-    let sid: string;
+    // If session found -> update lastUsedAt locally (and save)
+    // If not found -> create new session and save immediately so we have _id
     if (sessionDoc) {
-      // reuse
-      sid = sessionDoc.sid;
       sessionDoc.lastUsedAt = new Date();
+      // make sure it's saved (so refreshTokenHash write below is saved as well)
+      sessionDoc = await sessionDoc.save();
     } else {
-      sid = uuidv4();
+      const sid = uuidv4();
       sessionDoc = new Session({
         userId: saved._id,
         sid,
@@ -294,16 +295,22 @@ export async function POST(request: NextRequest): Promise<Response> {
         lastUsedAt: new Date(),
         expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), // 7 days
       });
+      sessionDoc = await sessionDoc.save(); // <- ensure saved, so sessionDoc._id exists
     }
 
-    // generate tokens (consistent claim names)
+    // Now we have sessionDoc._id (MongoDB ObjectId) — prefer this as sessionId in tokens
+    const sessionId = sessionDoc._id.toString();
+    const sidForCompat = sessionDoc.sid; // keep original sid too
+
+    // generate tokens (include sessionId in refresh token and auth token for convenience)
     const authToken = generateToken(
       {
         uid: newUserId,
         role: "client",
         name: name.trim(),
         company: company ? company : false,
-        sid,
+        sessionId, // prefer session _id
+        sid: sidForCompat, // compatibility
       },
       "AUTH",
       { expiresIn: "1h" }
@@ -312,8 +319,8 @@ export async function POST(request: NextRequest): Promise<Response> {
     const refreshTokenPayload = {
       uid: newUserId,
       role: "client",
-      sid,
-      fingerprint,
+      sessionId,
+      sid: sidForCompat,
       version: saved.refreshVersion,
     };
 
@@ -322,11 +329,42 @@ export async function POST(request: NextRequest): Promise<Response> {
     });
 
     // store only the hash of the refresh token in session doc
-    sessionDoc.refreshTokenHash = hashToken(refreshToken);
-    await sessionDoc.save();
+    try {
+      sessionDoc.refreshTokenHash = hashToken(refreshToken);
+      await sessionDoc.save();
+    } catch (e) {
+      // if saving hash fails, log but continue (not blocking registration)
+      console.log("Failed to save refreshTokenHash for session:", e);
+    }
 
     // record first/previous login as an upsert into lastLogin so new accounts are not flagged
-    await upsertLastLogin(newUserId!, sid, fingerprint, ip, userAgent);
+    await upsertLastLogin(newUserId!, sessionDoc.sid, fingerprint, ip, userAgent);
+
+    // optionally cache session snapshot in redis for hot path (trust engine will use trust:session:{sessionId})
+    if (redis) {
+      try {
+        const sessionSnapshot: any = {
+          _id: sessionDoc._id,
+          sid: sessionDoc.sid,
+          userId: sessionDoc.userId?.toString ? sessionDoc.userId.toString() : sessionDoc.userId,
+          fingerprint: sessionDoc.fingerprint ?? null,
+          fingerprintHash: sessionDoc.fingerprint
+            ? crypto.createHash("sha256").update(String(sessionDoc.fingerprint)).digest("hex")
+            : null,
+          revoked: !!sessionDoc.revoked,
+          blocked: !!sessionDoc.blocked,
+          lastUsedAt: sessionDoc.lastUsedAt ?? null,
+          createdAt: sessionDoc.createdAt ?? null,
+        };
+        await redis.set(`trust:session:${sessionId}`, JSON.stringify({ session: sessionSnapshot }), "EX", 15 * 60);
+        // also cache per-session fp
+        if (sessionSnapshot.fingerprintHash) {
+          await redis.set(`trust:fp:${sessionId}`, sessionSnapshot.fingerprintHash, "EX", 15 * 60);
+        }
+      } catch (e) {
+        console.log("Failed to cache session snapshot in redis:", e);
+      }
+    }
 
     // set cookies on response
     const res = Response.json(
