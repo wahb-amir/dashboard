@@ -8,11 +8,18 @@ const APP_SECRET = process.env.JWT_SECRET_APP;
 const INTERNAL_SECRET = process.env.JWT_INTERNAL_SECRET;
 const AUTH_SECRET = process.env.JWT_SECRET_AUTH;
 const REFRESH_SECRET = process.env.JWT_SECRET_REFRESH;
-
+const JWT_DEVICE_VERIFICATION_SECRET =
+  process.env.JWT_DEVICE_VERIFICATION_SECRET;
 const AUTH_EXPIRES_IN_APP = process.env.JWT_AUTH_EXPIRES_IN_APP || "1h";
 const origin = process.env.ORIGIN;
 
-if (!APP_SECRET || !AUTH_SECRET || !REFRESH_SECRET || !INTERNAL_SECRET) {
+if (
+  !APP_SECRET ||
+  !AUTH_SECRET ||
+  !REFRESH_SECRET ||
+  !INTERNAL_SECRET ||
+  !JWT_DEVICE_VERIFICATION_SECRET
+) {
   console.warn(
     "One or more JWT secrets are not set. Ensure JWT_SECRET_APP, JWT_SECRET_AUTH, JWT_SECRET_REFRESH and JWT_INTERNAL_SECRET exist in .env."
   );
@@ -21,7 +28,7 @@ if (!APP_SECRET || !AUTH_SECRET || !REFRESH_SECRET || !INTERNAL_SECRET) {
 /**
  * Types
  */
-export type TokenType = "AUTH" | "APP" | "REFRESH";
+export type TokenType = "AUTH" | "APP" | "REFRESH" | "DEVICE_VERIFICATION";
 
 export interface InternalTokenPayload {
   origin?: string;
@@ -32,19 +39,18 @@ export interface InternalTokenPayload {
 }
 
 export interface AuthTokenPayload {
-  uid: string;              
-  email?: string;            
-  role?: string;            
-  name?: string;            
-  company?: string 
-  deviceId?: string;         
-  fingerprint?: string;    
-  refreshVersion?: number;   
-  iat?: number;             
-  exp?: number;              
-  [key: string]: any;        
+  uid: string;
+  email?: string;
+  role?: string;
+  name?: string;
+  company?: string;
+  deviceId?: string;
+  fingerprint?: string;
+  refreshVersion?: number;
+  iat?: number;
+  exp?: number;
+  [key: string]: any;
 }
-
 
 export interface GenerateTokenOptions {
   expiresIn?: string | number;
@@ -80,7 +86,7 @@ export type VerifyTokenFn = (
 ) => VerifyResult | null;
 export type CheckAuthFn = (
   token: string,
-  type: "AUTH" | "REFRESH"
+  type: "AUTH" | "REFRESH" | "DEVICE_VERIFICATION"
 ) => AuthTokenPayload | null;
 
 export const generateToken: GenerateTokenFn = (
@@ -89,12 +95,16 @@ export const generateToken: GenerateTokenFn = (
   opts: GenerateTokenOptions = {}
 ): string => {
   // Choose secret based on token type
-  const secret =
-    type === "APP"
-      ? APP_SECRET
-      : type === "REFRESH"
-      ? REFRESH_SECRET
-      : AUTH_SECRET;
+  let secret;
+  if (type === "APP") {
+    secret = APP_SECRET;
+  } else if (type === "REFRESH") {
+    secret = REFRESH_SECRET;
+  } else if (type === "DEVICE_VERIFICATION") {
+    secret = JWT_DEVICE_VERIFICATION_SECRET;
+  } else {
+    secret = AUTH_SECRET;
+  }
 
   if (!secret) throw new Error("Missing JWT secret for type " + type);
 
@@ -109,6 +119,9 @@ export const generateToken: GenerateTokenFn = (
         break;
       case "REFRESH":
         expiresIn = "7d"; // typical refresh token duration
+        break;
+      case "DEVICE_VERIFICATION":
+        expiresIn = "1h";
         break;
       case "APP":
       default:
@@ -185,6 +198,9 @@ export const verifyToken: VerifyTokenFn = (token, type = "AUTH") => {
         break;
       case "REFRESH":
         secret = REFRESH_SECRET;
+        break;
+      case "DEVICE_VERIFICATION":
+        secret = JWT_DEVICE_VERIFICATION_SECRET;
         break;
       case "AUTH":
       default:

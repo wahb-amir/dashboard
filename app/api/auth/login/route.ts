@@ -217,12 +217,34 @@ export async function POST(request: NextRequest): Promise<Response> {
 
     // If still not found -> new device -> require 2FA (do NOT create session yet)
     if (!sessionDoc) {
-      // It's a new device or previous session expired — require 2FA
-      // (Frontend should prompt for 2FA and then call an endpoint to create a new session on success)
-      return Response.json(
+      const res = Response.json(
         { ok: false, message: "2FA required for new device", require2FA: true },
         { status: 403 }
       );
+      const DEVICE_VERIFICATION_PAYLOAD ={
+        uid: user._id.toString(),
+        purpose: "DEVICE_VERIFICATION",
+        fingerprint,
+        ip,
+        ua: userAgent,
+        jti: uuidv4(),
+        email:user.email,
+        name:user.name,
+      };
+      const deviceVerificationToken = generateToken(
+        DEVICE_VERIFICATION_PAYLOAD,
+        "DEVICE_VERIFICATION",
+        { expiresIn: "1h" }
+      );
+      // set device verification token cookie
+        res.cookies.set({
+          name: "deviceVerificationToken",
+          value: deviceVerificationToken,
+          httpOnly: true,
+          secure: process.env.NODE_ENV === "production",
+          sameSite: "strict",
+        });
+      return res;
     }
 
     // at this point a session is found. If it's a plain JSON snapshot from redis, it may not be a mongoose doc.
@@ -279,7 +301,29 @@ export async function POST(request: NextRequest): Promise<Response> {
     }
     if (trustResult.action === "require2FA") {
       // require 2FA for this session before issuing tokens
-      return Response.json({ ok: false, message: "2FA required", require2FA: true, reasons: trustResult.reasons }, { status: 403 });
+      const res = Response.json({ ok: false, message: "2FA required", require2FA: true, reasons: trustResult.reasons }, { status: 403 });
+      const DEVICE_VERIFICATION_PAYLOAD ={
+        uid: user._id.toString(),
+        purpose: "DEVICE_VERIFICATION",
+        fingerprint,
+        ip,
+        ua: userAgent,
+        jti: uuidv4(),
+      };
+      const deviceVerificationToken = generateToken(
+        DEVICE_VERIFICATION_PAYLOAD,
+        "DEVICE_VERIFICATION",
+        { expiresIn: "1h" }
+      );
+      // set device verification token cookie
+        res.cookies.set({
+          name: "deviceVerificationToken",
+          value: deviceVerificationToken,
+          httpOnly: true,
+          secure: process.env.NODE_ENV === "production",
+          sameSite: "strict",
+        });
+      return res;
     }
 
     // allow -> issue tokens. Ensure sessionMDoc exists to save refreshTokenHash.

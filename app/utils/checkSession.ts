@@ -85,7 +85,6 @@ export async function checkSession(opts?: {
     // 5) Trust engine - conservative: if any internal error => reject
     const trust = await evaluateTrust({
       decoded,
-      sessionDoc,
       userDoc,
       ip: opts?.ip ?? null,
       ua: opts?.ua ?? null,

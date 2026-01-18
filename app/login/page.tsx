@@ -95,6 +95,10 @@ export default function LoginPage() {
       toast.dismiss();
       toast.error("Please log in first");
     }
+    else if(params.get("reason") === "2fa-required"){
+      toast.dismiss();
+      toast.error("Please complete 2FA verification");
+    }
   }, [params]);
 
   // validation
@@ -267,6 +271,8 @@ export default function LoginPage() {
         success?: boolean;
         message?: string;
         error?: string;
+        require2FA?: boolean;
+
       };
 
       let data: ApiResponse | null = null;
@@ -277,8 +283,13 @@ export default function LoginPage() {
         data = null;
       }
 
-      // ❌ HTTP-level failure
+      //  HTTP-level failure
       if (!response.ok) {
+        if(response.status === 403 && data?.require2FA){
+          toast.error("Two-Factor Authentication is required. Please complete 2FA to proceed.");
+          router.push("/device-verification");
+          return;
+        }
         throw new Error(
           data?.error ??
             data?.message ??
