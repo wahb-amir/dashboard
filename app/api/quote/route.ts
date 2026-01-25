@@ -5,10 +5,6 @@ import Quote from "@/app/models/Quote";
 import User from "@/app/models/User";
 import { checkSession } from "@/app/utils/checkSession";
 
-/**
- * SaveQuote expects the decoded refresh token (refreshDecoded)
- * and returns { ok: boolean, quote?: any, message?: string }.
- */
 const SaveQuote = async (payload: Record<string, any>, userId: string) => {
   await connectToDatabase();
 
@@ -45,7 +41,6 @@ const SaveQuote = async (payload: Record<string, any>, userId: string) => {
   const saved =
     typeof newQuote.toObject === "function" ? newQuote.toObject() : newQuote;
   const { _id, __v, ...rest } = saved;
-
   return {
     ok: true,
     quote: {
@@ -57,7 +52,6 @@ const SaveQuote = async (payload: Record<string, any>, userId: string) => {
 
 export async function POST(request: Request) {
   try {
-    // --- 1️⃣ Check session ---
     const session = await checkSession();
     if (session.clearCookies) {
       return NextResponse.json({ ok: false, message: "Invalid session" }, { status: 401 });

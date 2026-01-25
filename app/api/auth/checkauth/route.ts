@@ -2,13 +2,8 @@ import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { verifyToken, generateToken } from "@/app/utils/token";
 import type { AuthTokenPayload } from "@/app/utils/token";
+import { decode } from "node:punycode";
 
-/**
- * GET /api/auth/restore
- * - If authToken valid -> return user
- * - Else if refreshToken valid -> rotate auth + refresh tokens
- * - Else -> auth: false
- */
 export async function GET() {
   try {
     const cookieStore = await cookies();
@@ -22,9 +17,7 @@ export async function GET() {
       type?: "AUTH" | "REFRESH" | "APP"
     ) => string;
 
-    /* ----------------------------------------------------
-       1️⃣ AUTH TOKEN (FAST PATH)
-    ---------------------------------------------------- */
+
     if (authToken) {
       const authRes = verifyToken(authToken, "AUTH");
 
@@ -48,21 +41,16 @@ export async function GET() {
       }
     }
 
-    /* ----------------------------------------------------
-       2️⃣ REFRESH TOKEN (ROTATION)
-    ---------------------------------------------------- */
     if (refreshToken) {
       const refreshRes = verifyToken(refreshToken, "REFRESH");
 
       if (refreshRes?.decoded) {
         const decoded = refreshRes.decoded as AuthTokenPayload;
+     
       
-        // 🔒 HARD VALIDATION (NO ROTATION IF BROKEN)
         if (
           !decoded.uid ||
           !decoded.sid ||
-          !decoded.fingerprint ||
-          typeof decoded.fingerprint !== "string" ||
           typeof decoded.sid !== "string"
         ) {
           console.warn("Invalid refresh token payload, rotation aborted");
