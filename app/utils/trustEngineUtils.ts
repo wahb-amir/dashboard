@@ -17,6 +17,6 @@ export async function invalidateTrustCache(sessionId: string, redisClient: any) 
 //usage
 // import { invalidateTrustCache } from "@/app/utils/trustEngineUtils";
 
-// // after marking session as revoked/blocked
+// after marking session as revoked/blocked
 // await SessionModel.findByIdAndUpdate(sessionId, { revoked: true });
 // await invalidateTrustCache(sessionId, redisClient);

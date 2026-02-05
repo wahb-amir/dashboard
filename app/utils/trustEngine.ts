@@ -74,15 +74,6 @@ function hexSimilarity(a: string, b: string) {
   return same / a.length;
 }
 
-/**
- * Read-only trust engine using only Session model + Redis caching for session snapshot.
- *
- * options.decoded: token payload (must include sessionId or sid)
- * options.currentFingerprint: fingerprint string computed on client (required to use fp checks)
- * options.redisClient: optional ioredis client (used to cache session snapshot & fp)
- *
- * Returns { score, action, reasons } — no DB writes except Redis caching.
- */
 export async function evaluateTrust(options: {
   decoded: AuthTokenPayload | Record<string, any>;
   userDoc?: any | null; // optional, for geo/time history
@@ -93,7 +84,7 @@ export async function evaluateTrust(options: {
   now?: Date;
   recentFailedLoginCount?: number;
   ipReputationScore?: number | null;
-  redisClient?: any; // ioredis - optional, used for caching only
+  redisClient?: any;
 }): Promise<TrustResult> {
   const {
     decoded,
@@ -164,7 +155,6 @@ export async function evaluateTrust(options: {
         sessionDoc = null;
       }
 
-      // cache fetched session (lightweight snapshot) if redis available
       if (sessionDoc && redisClient && sessionCacheKey) {
         try {
           const sessionSnapshot: any = {
@@ -179,19 +169,17 @@ export async function evaluateTrust(options: {
             createdAt: sessionDoc.createdAt ?? null,
           };
           await redisClient.set(sessionCacheKey, JSON.stringify({ session: sessionSnapshot }), "EX", CONFIG.SESSION_CACHE_TTL_SECONDS);
-          // optionally store per-session fp cache if session has fp
+      
           if (sessionSnapshot.fingerprintHash) {
             await redisClient.set(`trust:fp:${String(tokenSessionId)}`, sessionSnapshot.fingerprintHash, "EX", CONFIG.FP_CACHE_TTL_SECONDS);
           }
           // reuse sessionDoc as snapshot (so later logic reads same shape)
           sessionDoc = sessionSnapshot;
         } catch (e) {
-          // caching failure non-fatal
         }
       }
     }
 
-    // if still no session -> require admin/device approval
     if (!sessionDoc) {
       reasons.push("no_session");
       return { score: 0, action: "requireDeviceApproval", reasons };

@@ -15,10 +15,6 @@ export interface SessionCheckResult {
   requireAdminApproval?: boolean;
 }
 
-/**
- * checkSession accepts optional runtime signals:
- *   opts.ip, opts.ua, opts.geo, opts.recentFailedLoginCount, opts.ipReputationScore
- */
 export async function checkSession(opts?: {
   ip?: string | null;
   ua?: string | null;
@@ -31,7 +27,6 @@ export async function checkSession(opts?: {
   const refreshToken = cookieStore.get("refreshToken")?.value;
 
   try {
-      // 2) Need refresh token
       if (!refreshToken) {
         cookieStore.delete("authToken");
         cookieStore.delete("refreshToken");
@@ -52,7 +47,6 @@ export async function checkSession(opts?: {
       return { auth: false, clearCookies: true };
     }
 
-    // 3) DB checks
     await connectToDatabase();
     const userDoc = await User.findById(String(decoded.uid)).select("refreshVersion lastLogin avgLoginHour").lean().exec();
     if (!userDoc) {
@@ -70,7 +64,7 @@ export async function checkSession(opts?: {
       return { auth: false, clearCookies: true };
     }
 
-    // 4) Session lookup (sid may be absent -> sessionDoc null)
+    
     const sid = decoded.sid ?? null;
     let sessionDoc: any | null = null;
     if (sid) {
@@ -82,7 +76,6 @@ export async function checkSession(opts?: {
       }).lean().exec();
     }
 
-    // 5) Trust engine - conservative: if any internal error => reject
     const trust = await evaluateTrust({
       decoded,
       userDoc,
@@ -91,7 +84,7 @@ export async function checkSession(opts?: {
       geo: opts?.geo ?? null,
       recentFailedLoginCount: opts?.recentFailedLoginCount ?? 0,
       ipReputationScore: opts?.ipReputationScore ?? null,
-    //   redisClient: redis,
+      redisClient: redis,
     });
 
     if (trust.action === "allow") {
@@ -103,12 +96,9 @@ export async function checkSession(opts?: {
     if (trust.action === "requireDeviceApproval") {
       return { auth: false, requireAdminApproval: true };
     }
-
-    // default reject (trust.action === "reject")
     return { auth: false, clearCookies: true };
   } catch (err) {
     console.error("Session check error:", err);
-    // conservative fallback: clear cookies and reject
     cookieStore.delete("authToken");
     cookieStore.delete("refreshToken");
     return { auth: false, clearCookies: true };
