@@ -1,96 +1,115 @@
 import { FC } from "react";
-import {
-  FaCheckCircle,
-  FaGithub,
-  FaComments,
-  FaTasks,
-  FaClipboard,
-} from "react-icons/fa";
-import { IconType } from "react-icons";
+import { 
+  FileCode2, 
+  ShieldCheck, 
+  MessageSquareText, 
+  Zap, 
+  Github,
+  Layers
+} from "lucide-react";
 
 interface Feature {
+  tag: string;
   title: string;
   description: string;
-  icon: IconType;
-  // Tailwind-friendly color classes for the icon badge
-  colorClass: string;
+  icon: any; // Lucide icon component
 }
 
 const features: Feature[] = [
   {
-    title: "A Single Source of Truth",
-    description:
-      "From initial quote to final delivery, manage your entire project lifecycle in one place.",
-    icon: FaClipboard,
-    colorClass: "text-blue-600 bg-blue-50",
+    tag: "[ source ]",
+    title: "Single source of truth",
+    description: "Your entire project lives in one place. Specs, quotes, and deliverables bypass the email inbox entirely.",
+    icon: FileCode2,
   },
   {
-    title: "Quote Requests",
-    description:
-      "Clients can easily request quotes for new projects, providing all necessary details upfront.",
-    icon: FaCheckCircle,
-    colorClass: "text-green-600 bg-green-50",
+    tag: "[ scope ]",
+    title: "Structured agreements",
+    description: "Submit a brief, receive a precise quote. Scope, milestones, and pricing are mathematically laid out.",
+    icon: ShieldCheck,
   },
   {
-    title: "Live Messaging",
-    description:
-      "Real-time chat between clients and developers, keeping communication fluid and centralized.",
-    icon: FaComments,
-    colorClass: "text-purple-600 bg-purple-50",
+    tag: "[ comms ]",
+    title: "Contextual messaging",
+    description: "Direct, asynchronous chat mapped directly to the project phase. Signal over noise.",
+    icon: MessageSquareText,
   },
   {
-    title: "Progress Tracking",
-    description:
-      "Visualize project progress with automated updates from GitHub activity.",
-    icon: FaTasks,
-    colorClass: "text-yellow-600 bg-yellow-50",
+    tag: "[ sync ]",
+    title: "Automated tracking",
+    description: "Milestones tick over automatically as backend and frontend work merges. No manual reporting.",
+    icon: Zap,
   },
   {
-    title: "GitHub Integration",
-    description:
-      "Seamlessly sync your repos, commits, and pull requests to automate progress reporting.",
-    icon: FaGithub,
-    colorClass: "text-gray-800 bg-gray-100",
+    tag: "[ pipeline ]",
+    title: "GitHub pipeline",
+    description: "Repository commits and PRs sync directly to the dashboard interface. Code speaks for itself.",
+    icon: Github,
   },
 ];
 
 const FeatureCard: FC = () => {
   return (
-    <section aria-labelledby="features-title" className="max-w-6xl mx-auto px-4 py-16">
-      <h2 id="features-title" className="text-3xl sm:text-4xl font-bold text-gray-900 text-center mb-12">
-        Key Features
-      </h2>
+    <section className="mx-auto max-w-6xl">
+      {/* Header Section */}
+      <div className="border-x border-t border-stone-200 bg-white px-8 py-20 md:px-12">
+        <p className="mb-4 font-mono text-[11px] uppercase tracking-[0.3em] text-stone-400">
+          Architecture
+        </p>
+        <h2 className="font-serif text-[clamp(32px,5vw,48px)] font-normal leading-tight tracking-tight text-stone-950">
+          Built for <em className="italic text-teal-800">velocity.</em>
+        </h2>
+        <p className="mt-6 max-w-xl text-[15px] font-light leading-relaxed text-stone-500">
+          The portal eliminates administrative friction, allowing focus to remain 
+          entirely on high-performance engineering and rapid deployment.
+        </p>
+      </div>
 
-      <ul className="grid gap-8 sm:grid-cols-2 lg:grid-cols-3">
-        {features.map((feature, idx) => {
-          const Icon = feature.icon;
-          return (
-            <li
-              key={idx}
-              // use article/role semantics inside list item if you prefer; li is fine too
-              className="flex flex-col p-6 bg-white/95 border border-gray-100 rounded-xl shadow-sm
-                         transition-transform duration-200 transform-gpu hover:-translate-y-1 hover:shadow-lg"
-              // performance hints:
-              style={{
-                willChange: "transform, opacity",
-                // 'contain: paint' isolates painting; modern browsers benefit from it
-                contain: "paint",
-              }}
-            >
-              <div
-                className={`inline-flex items-center justify-center w-12 h-12 rounded-lg mb-4 ${feature.colorClass}`}
-                aria-hidden
-              >
-                
-                {/* @ts-ignore */}
-                <Icon className="w-6 h-6" />
-              </div>
+      {/* Blueprint Grid */}
+      <ul className="grid grid-cols-1 gap-px border border-stone-200 bg-stone-200 sm:grid-cols-2 lg:grid-cols-3">
+        {features.map((feature, idx) => (
+          <li
+            key={idx}
+            className="group relative flex flex-col bg-white px-8 py-12 transition-all duration-500 hover:bg-stone-50/50"
+          >
+            <div className="mb-10 flex items-center justify-between">
+              <p className="font-mono text-[10px] uppercase tracking-[0.2em] text-stone-400 group-hover:text-teal-700 transition-colors">
+                {feature.tag}
+              </p>
+              <feature.icon 
+                size={20} 
+                strokeWidth={1.25} 
+                className="text-stone-300 group-hover:text-teal-800 transition-colors duration-500" 
+              />
+            </div>
+            
+            <h3 className="mb-4 font-serif text-[22px] text-stone-900 transition-transform duration-500 group-hover:translate-x-1">
+              {feature.title}
+            </h3>
+            
+            <p className="text-[14px] font-light leading-relaxed text-stone-500">
+              {feature.description}
+            </p>
+            
+            {/* Subtle corner accent on hover */}
+            <div className="absolute bottom-4 right-4 h-1 w-1 rounded-full bg-teal-800 opacity-0 transition-opacity group-hover:opacity-100" />
+          </li>
+        ))}
 
-              <h3 className="text-lg font-semibold text-gray-900 mb-2">{feature.title}</h3>
-              <p className="text-gray-700 text-sm">{feature.description}</p>
-            </li>
-          );
-        })}
+        {/* The Roadmap/Future Cell */}
+        <li className="flex flex-col justify-center bg-stone-950 px-8 py-12 text-stone-50">
+          <div className="mb-6 flex items-center gap-3">
+            <Layers size={18} className="text-teal-500" strokeWidth={1.5} />
+            <p className="font-mono text-[10px] uppercase tracking-[0.2em] text-stone-500">
+              [ roadmap ]
+            </p>
+          </div>
+          <p className="text-[14px] font-light leading-relaxed text-stone-400">
+            Future architecture includes deeper integrations with Vercel Webhooks, 
+            automated Stripe invoicing, and specialized AI-driven scope analysis.
+          </p>
+          <div className="mt-8 h-px w-12 bg-stone-800" />
+        </li>
       </ul>
     </section>
   );

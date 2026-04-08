@@ -2,10 +2,9 @@
 
 import React, { useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import toast, { Toaster } from "react-hot-toast";
-import FloatingLabel from "../components/ui/FloatingLabel";
-import { useSearchParams } from "next/navigation";
+import { motion } from "framer-motion"; // Fixed import
 
 type FormState = {
   email: string;
@@ -14,583 +13,236 @@ type FormState = {
 
 const APP_TOKEN_URL = "/api/auth/app_token";
 const MAX_RETRIES = 3;
-// default TTL if server doesn't give one: 30 minutes
 const DEFAULT_TTL_MS = 30 * 60 * 1000;
-// if token has < this left, treat as 'about to expire' and refresh (e.g., 60s)
 const REFRESH_BEFORE_MS = 60 * 1000;
-
 const STORAGE_KEY = "appToken_record";
 
+// --- Token Management Utilities ---
 function setSessionToken(token: string, ttlMs = DEFAULT_TTL_MS) {
   try {
     if (typeof window === "undefined") return;
     const record = { token, expiry: Date.now() + ttlMs };
     sessionStorage.setItem(STORAGE_KEY, JSON.stringify(record));
   } catch (e) {
-    // storage errors are rare, but don't crash the app
     console.error("Failed to set session token", e);
   }
 }
 
 function getSessionTokenRecord(): { token: string; expiry: number } | null {
-  // Guard: do not access sessionStorage on server
   if (typeof window === "undefined") return null;
   try {
     const raw = sessionStorage.getItem(STORAGE_KEY);
     if (!raw) return null;
     const rec = JSON.parse(raw);
-    if (!rec || typeof rec.token !== "string" || typeof rec.expiry !== "number")
-      throw new Error("invalid record");
-    // expired?
+    if (!rec || typeof rec.token !== "string" || typeof rec.expiry !== "number") return null;
     if (Date.now() > rec.expiry) {
-      try {
-        sessionStorage.removeItem(STORAGE_KEY);
-      } catch {}
+      sessionStorage.removeItem(STORAGE_KEY);
       return null;
     }
     return rec;
-  } catch (e) {
-    try {
-      sessionStorage.removeItem(STORAGE_KEY);
-    } catch {}
+  } catch {
     return null;
   }
 }
 
 function removeSessionToken() {
   try {
-    if (typeof window === "undefined") return;
-    sessionStorage.removeItem(STORAGE_KEY);
+    if (typeof window !== "undefined") sessionStorage.removeItem(STORAGE_KEY);
   } catch {}
 }
 
 export default function LoginPage() {
   const router = useRouter();
-  const [form, setForm] = useState<FormState>({ email: "", password: "" });
-  const [showPassword, setShowPassword] = useState(false);
-  const [errors, setErrors] = useState<{ email?: string; password?: string }>(
-    {}
-  );
-  const [loading, setLoading] = useState(false); // signing in
-  const [serverError, setServerError] = useState<string | null>(null);
   const params = useSearchParams();
-
-  // App token state + loading
+  const [form, setForm] = useState<FormState>({ email: "", password: "" });
+  const [errors, setErrors] = useState<{ email?: string; password?: string }>({});
+  const [loading, setLoading] = useState(false);
+  const [loadingApp, setLoadingApp] = useState(true);
   const [appToken, setAppToken] = useState<string | null>(null);
-  // start "loading" on the client until we read storage in useEffect
-  const [loadingApp, setLoadingApp] = useState<boolean>(true);
+  const fetchingRef = useRef<Promise<string | null> | null>(null);
 
-  // read sessionStorage only on mount (client)
+  // Sync token state on mount
   useEffect(() => {
     const rec = getSessionTokenRecord();
     if (rec) setAppToken(rec.token);
     setLoadingApp(false);
   }, []);
 
-  // in-memory lock / promise to prevent concurrent token fetches
-  const fetchingRef = useRef<Promise<string | null> | null>(null);
-
+  // Handle URL params for error messages
   useEffect(() => {
-    if (params.get("reason") === "auth") {
-      toast.dismiss();
-      toast.error("Please log in first");
-    }
-    else if(params.get("reason") === "2fa-required"){
-      toast.dismiss();
-      toast.error("Please complete 2FA verification");
+    const reason = params.get("reason");
+    if (reason === "auth") {
+      toast.error("Session required. Please log in.");
+    } else if (reason === "2fa-required") {
+      toast.error("Verification required.");
     }
   }, [params]);
 
-  // validation
-  function validate(): boolean {
-    const e: { email?: string; password?: string } = {};
-    if (!form.email.trim()) e.email = "Email is required";
-    else if (!/^\S+@\S+\.\S+$/.test(form.email))
-      e.email = "Please enter a valid email";
-
-    if (!form.password) e.password = "Password is required";
-    else if (form.password.length < 6)
-      e.password = "Password must be at least 6 characters";
-
-    setErrors(e);
-    return Object.keys(e).length === 0;
-  }
-
-  // core: fetch token with retry; returns token or null
-  async function fetchAppTokenOnce(): Promise<{
-    token: string;
-    ttlMs?: number;
-  } | null> {
+  async function fetchAppTokenOnce(): Promise<{ token: string; ttlMs?: number } | null> {
     for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
       try {
-        if (attempt > 0) {
-          // exponential-ish backoff
-          await new Promise((r) => setTimeout(r, Math.pow(2, attempt) * 250));
-        }
-
+        if (attempt > 0) await new Promise((r) => setTimeout(r, Math.pow(2, attempt) * 250));
         const res = await fetch(APP_TOKEN_URL, {
           method: "GET",
           credentials: "same-origin",
-          headers: { "Content-Type": "application/json" },
         });
-
-        if (!res.ok) {
-          const text = await res.text().catch(() => "");
-          throw new Error(`Status ${res.status} ${text}`);
-        }
-
-        const data = await res.json().catch(() => null);
-        if (!data || !data.token) throw new Error("Invalid token response");
-
-        // server may return TTL info:
-        // common shapes: { token, expires_in: seconds } or { token, ttl_ms }
-        let ttlMs: number | undefined = undefined;
-        if (typeof data.expires_in === "number") ttlMs = data.expires_in * 1000;
-        else if (typeof data.ttl_ms === "number") ttlMs = data.ttl_ms;
-        else if (typeof data.expiresAt === "string") {
-          // ISO timestamp
-          const when = Date.parse(data.expiresAt);
-          if (!Number.isNaN(when)) ttlMs = when - Date.now();
-        }
-
+        if (!res.ok) throw new Error(`Status ${res.status}`);
+        const data = await res.json();
+        let ttlMs: number | undefined;
+        if (data.expires_in) ttlMs = data.expires_in * 1000;
         return { token: data.token, ttlMs };
       } catch (err) {
-        console.error("App token fetch error (attempt)", attempt + 1, err);
-        if (attempt === MAX_RETRIES - 1) {
-          return null;
-        }
-        // else continue retry loop
+        if (attempt === MAX_RETRIES - 1) return null;
       }
     }
     return null;
   }
 
-  // wrapper that prevents concurrent token fetches and updates state+storage
   async function ensureValidAppToken(): Promise<string | null> {
-    // if a fetch is already in progress, await it
     if (fetchingRef.current) return fetchingRef.current;
-
     const promise = (async () => {
       setLoadingApp(true);
       try {
-        // first check existing stored token (safe because this function is called from client code / effects)
         const rec = getSessionTokenRecord();
-        if (rec) {
-          // if token is about to expire, refresh
-          const timeLeft = rec.expiry - Date.now();
-          if (timeLeft > REFRESH_BEFORE_MS) {
-            setAppToken(rec.token);
-            return rec.token;
-          }
-          // else fallthrough to fetch new
+        if (rec && (rec.expiry - Date.now() > REFRESH_BEFORE_MS)) {
+          setAppToken(rec.token);
+          return rec.token;
         }
-
-        // fetch new token
-        toast.loading("Fetching app token...", { id: "app-token" });
         const result = await fetchAppTokenOnce();
-        toast.dismiss("app-token");
-
         if (!result) {
-          // failed to fetch
           removeSessionToken();
           setAppToken(null);
-          toast.error("Failed to fetch app token. Please try again later.");
           return null;
         }
-
-        const ttl = result.ttlMs ?? DEFAULT_TTL_MS;
-        setSessionToken(result.token, ttl);
+        setSessionToken(result.token, result.ttlMs ?? DEFAULT_TTL_MS);
         setAppToken(result.token);
-        toast.success("Ready");
         return result.token;
       } finally {
         setLoadingApp(false);
         fetchingRef.current = null;
       }
     })();
-
     fetchingRef.current = promise;
     return promise;
   }
 
-  // on mount: ensure we have token (but don't block UI if already present)
-  useEffect(() => {
-    let mounted = true;
-    async function init() {
-      const rec = getSessionTokenRecord();
-      if (rec) {
-        // token present and not expired
-        if (!mounted) return;
-        setAppToken(rec.token);
-        setLoadingApp(false);
-        return;
-      }
-      // otherwise attempt to fetch right away
-      await ensureValidAppToken();
-    }
-    init();
-
-    return () => {
-      mounted = false;
-      toast.dismiss("app-token");
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  function validate(): boolean {
+    const e: { email?: string; password?: string } = {};
+    if (!form.email.trim()) e.email = "Email required";
+    if (!form.password) e.password = "Password required";
+    setErrors(e);
+    return Object.keys(e).length === 0;
+  }
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    setServerError(null);
-
-    const email = form.email.trim();
-    const password = form.password;
-
     if (!validate()) return;
 
-    // ensure valid token (refresh if expired or about-to-expire)
     const token = await ensureValidAppToken();
     if (!token) {
-      toast.error("App is not ready. Please wait and try again.");
+      toast.error("Security handshake failed. Please refresh.");
       return;
     }
 
     setLoading(true);
-    const toastId = toast.loading("Signing in…");
+    const toastId = toast.loading("Authenticating...");
     try {
       const response = await fetch("/api/auth/login", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-app-token": token,
-        },
-        body: JSON.stringify({ email, password }),
+        headers: { "Content-Type": "application/json", "x-app-token": token },
+        body: JSON.stringify(form),
         credentials: "same-origin",
       });
 
-      type ApiResponse = {
-        token?: string;
-        success?: boolean;
-        message?: string;
-        error?: string;
-        require2FA?: boolean;
+      const data = await response.json();
 
-      };
-
-      let data: ApiResponse | null = null;
-
-      try {
-        data = (await response.json()) as ApiResponse;
-      } catch {
-        data = null;
-      }
-
-      //  HTTP-level failure
       if (!response.ok) {
-        if(response.status === 403 && data?.require2FA){
-          toast.error("Two-Factor Authentication is required. Please complete 2FA to proceed.");
+        if (response.status === 403 && data?.require2FA) {
           router.push("/device-verification");
           return;
         }
-        throw new Error(
-          data?.error ??
-            data?.message ??
-            `Login failed (status ${response.status}). Please check credentials.`
-        );
+        throw new Error(data?.message || "Login failed.");
       }
 
-      // ❌ No/invalid body
-      if (!data) {
-        throw new Error("Invalid response from server");
-      }
-
-      // ✅ Success
-      if (data.token || data.success) {
-        toast.success("Signed in successfully!");
-        router.push("/dashboard");
-        // trigger navbar to update auth state
-        window.dispatchEvent(new Event("auth-change"));
-        // cross-tab: (writes to localStorage to trigger 'storage' across tabs)
-        localStorage.setItem("auth:updated", Date.now().toString());
-        return;
-      }
-
-      // ❌ Logical failure
-      throw new Error(data.message ?? "Invalid email or password");
-    } catch (err: unknown) {
-      console.error("Login error:", err);
-
-      const message =
-        err instanceof Error
-          ? err.message
-          : "Failed to sign in. Please try again.";
-
-      setServerError(message);
-      toast.error(message);
-    } finally {
-      toast.dismiss(toastId);
+      toast.success("Identity verified.", { id: toastId });
+      window.dispatchEvent(new Event("auth-change"));
+      router.push("/dashboard");
+    } catch (err: any) {
+      toast.error(err.message, { id: toastId });
       setLoading(false);
     }
   }
 
-  const formDisabled = loadingApp || loading;
-
   return (
-    <div className="min-h-screen bg-gray-50 text-gray-800 antialiased">
-      <Toaster position="top-right" />
+    <div className="flex min-h-screen flex-col bg-[#FAFAFA] text-stone-900 selection:bg-teal-900 selection:text-teal-50">
+      <Toaster position="bottom-right" />
 
-      <main className="flex-1 flex items-center justify-center py-12 px-4">
-        <div className="w-full max-w-4xl">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-8 items-center">
-            {/* left: brand / benefits */}
-            <aside className="order-2 md:order-1">
-              <div className="rounded-2xl p-6 md:p-10 bg-white shadow-sm border border-gray-100">
-                <div className="flex items-center gap-4 mb-6">
-                  <div>
-                    <h2 className="text-2xl font-bold text-gray-900">
-                      Welcome
-                    </h2>
-                    <p className="text-sm text-gray-600 mt-1">
-                      A single platform for quotes, messaging, and automated
-                      progress reporting.
-                    </p>
-                  </div>
-                </div>
-
-                <ul className="space-y-4 text-gray-700">
-                  <li className="flex items-start gap-3">
-                    <span className="mt-1 inline-flex h-6 w-6 items-center justify-center rounded-md bg-blue-50 text-blue-600 font-semibold">
-                      ✓
-                    </span>
-                    <div>
-                      <p className="font-medium text-gray-900">
-                        Single source of truth
-                      </p>
-                      <p className="text-sm text-gray-600 max-w-xl">
-                        Keep clients and developers aligned from quote to
-                        delivery.
-                      </p>
-                    </div>
-                  </li>
-
-                  <li className="flex items-start gap-3">
-                    <span className="mt-1 inline-flex h-6 w-6 items-center justify-center rounded-md bg-purple-50 text-purple-600 font-semibold">
-                      💬
-                    </span>
-                    <div>
-                      <p className="font-medium text-gray-900">
-                        Live messaging
-                      </p>
-                      <p className="text-sm text-gray-600">
-                        Real-time conversation without email clutter.
-                      </p>
-                    </div>
-                  </li>
-
-                  <li className="flex items-start gap-3">
-                    <span className="mt-1 inline-flex h-6 w-6 items-center justify-center rounded-md bg-yellow-50 text-yellow-600 font-semibold">
-                      ⤴
-                    </span>
-                    <div>
-                      <p className="font-medium text-gray-900">
-                        GitHub integration
-                      </p>
-                      <p className="text-sm text-gray-600">
-                        Automated progress from commits & PRs.
-                      </p>
-                    </div>
-                  </li>
-                </ul>
-              </div>
-            </aside>
-
-            {/* right: form */}
-            <section className="order-1 md:order-2">
-              <div
-                className={`relative bg-white rounded-2xl shadow-md border border-gray-100 p-6 sm:p-8 transition-opacity ${
-                  formDisabled
-                    ? "opacity-60 pointer-events-none"
-                    : "opacity-100"
-                }`}
-                aria-busy={formDisabled}
-              >
-                {/* loading overlay when fetching app token */}
-                {loadingApp && (
-                  <div className="absolute inset-0 z-10 flex items-center justify-center">
-                    <div className="flex flex-col items-center gap-3">
-                      <svg
-                        className="w-10 h-10 animate-spin text-gray-400"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        aria-hidden
-                      >
-                        <circle
-                          className="opacity-25"
-                          cx="12"
-                          cy="12"
-                          r="10"
-                          stroke="currentColor"
-                          strokeWidth="4"
-                        />
-                        <path
-                          className="opacity-75"
-                          fill="currentColor"
-                          d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"
-                        />
-                      </svg>
-                      <div className="text-sm text-gray-600">
-                        Preparing secure connection…
-                      </div>
-                    </div>
-                  </div>
-                )}
-
-                <div className="mb-6">
-                  <h1 className="text-lg md:text-2xl font-semibold text-gray-900">
-                    Sign in to your account
-                  </h1>
-                  <p className="text-sm text-gray-600 mt-1">
-                    Enter your email and password to continue.
-                  </p>
-                </div>
-
-                {serverError && (
-                  <div className="mb-4 text-sm text-red-700 bg-red-50 p-3 rounded-md border border-red-100">
-                    {serverError}
-                  </div>
-                )}
-
-                <form onSubmit={handleSubmit} noValidate>
-                  <div className="space-y-4 md:space-y-6">
-                    <FloatingLabel
-                      id="email"
-                      label="Email"
-                      type="email"
-                      value={form.email}
-                      onChange={(e) =>
-                        setForm((s) => ({ ...s, email: e.target.value }))
-                      }
-                      error={errors.email}
-                      autoComplete="email"
-                    />
-
-                    <FloatingLabel
-                      id="password"
-                      label="Password"
-                      type={showPassword ? "text" : "password"}
-                      value={form.password}
-                      onChange={(e) =>
-                        setForm((s) => ({ ...s, password: e.target.value }))
-                      }
-                      error={errors.password}
-                      autoComplete="current-password"
-                      trailing={
-                        <button
-                          type="button"
-                          onClick={() => setShowPassword((v) => !v)}
-                          className="inline-flex items-center justify-center w-8 h-8 rounded text-gray-500 hover:bg-gray-100"
-                          aria-label={
-                            showPassword ? "Hide password" : "Show password"
-                          }
-                        >
-                          {showPassword ? (
-                            <svg
-                              xmlns="http://www.w3.org/2000/svg"
-                              className="w-5 h-5"
-                              fill="none"
-                              viewBox="0 0 24 24"
-                              stroke="currentColor"
-                            >
-                              <path
-                                strokeLinecap="round"
-                                strokeLinejoin="round"
-                                strokeWidth="2"
-                                d="M13.875 18.825A10.05 10.05 0 0112 19c-5 0-9-3.582-10-8 1-4.418 5-8 10-8 1.054 0 2.07.143 3.03.41M15 12a3 3 0 11-6 0 3 3 0 016 0z"
-                              />
-                              <path
-                                strokeLinecap="round"
-                                strokeLinejoin="round"
-                                strokeWidth="2"
-                                d="M3 3l18 18"
-                              />
-                            </svg>
-                          ) : (
-                            <svg
-                              xmlns="http://www.w3.org/2000/svg"
-                              className="w-5 h-5"
-                              fill="none"
-                              viewBox="0 0 24 24"
-                              stroke="currentColor"
-                            >
-                              <path
-                                strokeLinecap="round"
-                                strokeLinejoin="round"
-                                strokeWidth="2"
-                                d="M2.458 12C3.732 7.943 7.523 5 12 5c4.477 0 8.268 2.943 9.542 7-1.274 4.057-5.065 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"
-                              />
-                              <path
-                                strokeLinecap="round"
-                                strokeLinejoin="round"
-                                strokeWidth="2"
-                                d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
-                              />
-                            </svg>
-                          )}
-                        </button>
-                      }
-                    />
-                  </div>
-
-                  <div className="flex items-center justify-between mb-6 mt-6">
-                    <Link
-                      href="/forgot"
-                      className="text-sm text-blue-600 hover:underline"
-                    >
-                      Forgot password?
-                    </Link>
-                  </div>
-
-                  <button
-                    type="submit"
-                    disabled={formDisabled}
-                    className="w-full inline-flex items-center justify-center gap-2 px-4 py-3 bg-blue-600 text-white font-semibold rounded-lg hover:bg-blue-700 disabled:opacity-60"
-                  >
-                    {loading ? (
-                      <svg
-                        className="w-5 h-5 animate-spin"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                      >
-                        <circle
-                          className="opacity-25"
-                          cx="12"
-                          cy="12"
-                          r="10"
-                          stroke="white"
-                          strokeWidth="4"
-                        />
-                        <path
-                          className="opacity-75"
-                          fill="currentColor"
-                          d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"
-                        />
-                      </svg>
-                    ) : null}
-                    <span>{loading ? "Signing in…" : "Sign in"}</span>
-                  </button>
-                </form>
-
-                <p className="text-center text-sm text-gray-600 mt-6">
-                  New here?{" "}
-                  <Link
-                    href="/register"
-                    className="text-blue-600 hover:underline"
-                  >
-                    Create an account
-                  </Link>
-                </p>
-              </div>
-            </section>
+      <main className="flex flex-1 items-center justify-center px-6 py-20">
+        <motion.div
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.6, ease: [0.22, 1, 0.36, 1] }}
+          className="w-full max-w-[420px]"
+        >
+          <div className="mb-10 text-center">
+            <Link href="/" className="mb-8 inline-block font-mono text-[11px] uppercase tracking-[0.2em] text-stone-400 hover:text-stone-900 transition-colors">
+              ← Back to Portal
+            </Link>
+            <h1 className="font-serif text-[42px] font-normal tracking-tight text-stone-950">
+              Welcome <em className="italic text-teal-800">back.</em>
+            </h1>
           </div>
-        </div>
+
+          <div className="rounded-xl border border-stone-200 bg-white p-8 shadow-sm">
+            <form onSubmit={handleSubmit} className="space-y-6">
+              <div className="space-y-1.5">
+                <label className="font-mono text-[10px] uppercase tracking-[0.1em] text-stone-400">Email Address</label>
+                <input
+                  type="email"
+                  value={form.email}
+                  onChange={(e) => setForm({ ...form, email: e.target.value })}
+                  className="w-full border-b border-stone-200 bg-transparent py-2 text-[15px] font-light outline-none transition-colors focus:border-teal-600"
+                  placeholder="name@company.com"
+                  required
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <div className="flex justify-between">
+                  <label className="font-mono text-[10px] uppercase tracking-[0.1em] text-stone-400">Password</label>
+                  <Link href="/forgot" className="font-mono text-[10px] uppercase tracking-[0.1em] text-stone-400 hover:text-stone-900">Forgot?</Link>
+                </div>
+                <input
+                  type="password"
+                  value={form.password}
+                  onChange={(e) => setForm({ ...form, password: e.target.value })}
+                  className="w-full border-b border-stone-200 bg-transparent py-2 text-[15px] font-light outline-none transition-colors focus:border-teal-600"
+                  placeholder="••••••••"
+                  required
+                />
+              </div>
+
+              <button
+                type="submit"
+                disabled={loading || loadingApp}
+                className="group relative w-full overflow-hidden rounded-full bg-stone-950 py-3.5 text-[14px] font-medium text-stone-50 transition duration-300 hover:bg-teal-900 disabled:opacity-50"
+              >
+                <span className="relative z-10">
+                  {loadingApp ? "Syncing App Token..." : loading ? "Authenticating..." : "Sign in to Dashboard"}
+                </span>
+              </button>
+            </form>
+
+            <div className="mt-8 border-t border-stone-100 pt-6 text-center">
+              <p className="text-[13px] font-light text-stone-500">
+                New to the portal?{" "}
+                <Link href="/register" className="font-medium text-stone-900 underline decoration-stone-200 underline-offset-4 hover:decoration-teal-600">
+                  Create an account
+                </Link>
+              </p>
+            </div>
+          </div>
+        </motion.div>
       </main>
     </div>
   );

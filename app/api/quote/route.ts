@@ -52,21 +52,21 @@ const SaveQuote = async (payload: Record<string, any>, userId: string) => {
 
 export async function POST(request: Request) {
   try {
-    // const session = await checkSession();
-    // if (session.clearCookies) {
-    //   return NextResponse.json({ ok: false, message: "Invalid session" }, { status: 401 });
-    // }
-    // if (session.require2FA) {
-    //   return NextResponse.json({ ok: false, message: "2FA required" }, { status: 403 });
-    // }
-    // if (session.requireAdminApproval) {
-    //   return NextResponse.json({ ok: false, message: "Admin approval required" }, { status: 403 });
-    // }
-    // if (!session.auth || !session.user) {
-    //   return NextResponse.json({ ok: false, message: "Not authenticated" }, { status: 401 });
-    // }
+    const session = await checkSession();
+    if (session.clearCookies) {
+      return NextResponse.json({ ok: false, message: "Invalid session" }, { status: 401 });
+    }
+    if (session.require2FA) {
+      return NextResponse.json({ ok: false, message: "2FA required" }, { status: 403 });
+    }
+    if (session.requireAdminApproval) {
+      return NextResponse.json({ ok: false, message: "Admin approval required" }, { status: 403 });
+    }
+    if (!session.auth || !session.user) {
+      return NextResponse.json({ ok: false, message: "Not authenticated" }, { status: 401 });
+    }
 
-    // const user = session.user;
+    const user = session.user;
 
     // --- 2️⃣ Parse request body ---
     const contentType = (request.headers.get("content-type") || "").toLowerCase();

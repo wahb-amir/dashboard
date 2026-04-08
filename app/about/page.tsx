@@ -2,335 +2,186 @@
 
 import React from "react";
 import Link from "next/link";
-import {
-  CheckCircle,
-  GitCommit,
-  MessageSquare,
-  Briefcase,
-  BarChart,
-} from "lucide-react";
+import { motion } from "framer-motion";
 import { FaGithub } from "react-icons/fa";
-type IconComponent = React.ComponentType<React.SVGProps<SVGSVGElement>>;
+import { 
+  Briefcase, 
+  CheckCircle, 
+  AlertCircle, 
+  Settings, 
+  Zap, 
+  Layout 
+} from "lucide-react";
 
-/* ------------------------- Small local UI primitives ------------------------ */
-
-interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
-  variant?: "solid" | "ghost";
-  asLink?: boolean;
-  href?: string;
-}
-
-function Button({
-  variant = "solid",
-  children,
-  className = "",
-  asLink,
-  href,
-  ...rest
-}: ButtonProps) {
-  const base =
-    "inline-flex items-center justify-center rounded-md font-semibold transition focus:outline-none focus:ring-2 focus:ring-offset-2";
-  const variants: Record<string, string> = {
-    solid: "bg-blue-600 text-white hover:bg-blue-700 focus:ring-blue-400",
-    ghost:
-      "bg-transparent text-gray-800 hover:bg-gray-100 focus:ring-gray-300 border border-transparent",
-  };
-
-  const classes = `${base} ${variants[variant]} ${className}`;
-
-  if (asLink && href) {
-    return (
-      <Link href={href} className={classes}>
-        {children}
-      </Link>
-    );
-  }
+const AboutPage = () => {
+  const features = [
+    {
+      tag: "[ 01 ]",
+      icon: Briefcase,
+      title: "Quote Requests",
+      desc: "Clients provide necessary details upfront so work starts with a clear, documented scope.",
+    },
+    {
+      tag: "[ 02 ]",
+      icon: Layout,
+      title: "Live Messaging",
+      desc: "Real-time communication keeps project context direct and significantly reduces email fragmentation.",
+    },
+    {
+      tag: "[ 03 ]",
+      icon: Zap,
+      title: "Progress Tracking",
+      desc: "Automated updates from development activity and commits provide visual transparency.",
+    },
+    {
+      tag: "[ 04 ]",
+      icon: Settings,
+      title: "GitHub Integration",
+      desc: "Repos and pull requests sync directly to automate progress reporting and status updates.",
+    },
+  ];
 
   return (
-    <button className={classes} {...rest}>
-      {children}
-    </button>
-  );
-}
-
-interface CardProps extends React.HTMLAttributes<HTMLDivElement> {
-  as?: string;
-  children: React.ReactNode;
-}
-
-function Card({ children, className = "", ...rest }: CardProps) {
-  // lightweight card: no expensive blur, good reshape for performance
-  return (
-    <div
-      className={`bg-white/95 border border-gray-100 rounded-xl shadow-sm p-6 transition-transform duration-200 transform-gpu hover:-translate-y-1 hover:shadow-lg ${className}`}
-      style={{ willChange: "transform, opacity", contain: "paint" }}
-      {...rest}
-    >
-      {children}
-    </div>
-  );
-}
-
-function CardHeader({ children }: { children: React.ReactNode }) {
-  return <div className="flex items-center gap-4 mb-3">{children}</div>;
-}
-function CardTitle({ children }: { children: React.ReactNode }) {
-  return <h3 className="text-lg font-semibold text-gray-900">{children}</h3>;
-}
-function CardContent({ children }: { children: React.ReactNode }) {
-  return <div className="text-gray-700 text-sm">{children}</div>;
-}
-
-/* ------------------------------- Data + Page ------------------------------- */
-
-const features: {
-  icon: IconComponent;
-  title: string;
-  description: string;
-  colorClass?: string;
-}[] = [
-  {
-    icon: Briefcase,
-    title: "Quote Requests",
-    description:
-      "Clients can request quotes for new projects, providing necessary details upfront so work starts with clear scope.",
-    colorClass: "text-blue-600 bg-blue-50",
-  },
-  {
-    icon: MessageSquare,
-    title: "Live Messaging",
-    description:
-      "Real-time chat between clients and developers keeps communication direct and reduces email noise.",
-    colorClass: "text-purple-600 bg-purple-50",
-  },
-  {
-    icon: BarChart,
-    title: "Progress Tracking",
-    description:
-      "Visualize project progress with automated updates from development activity and commits.",
-    colorClass: "text-yellow-600 bg-yellow-50",
-  },
-  {
-    icon: GitCommit,
-    title: "GitHub Integration",
-    description:
-      "Sync repos, commits, and pull requests to automate progress reporting and reduce manual status updates.",
-    colorClass: "text-gray-800 bg-gray-100",
-  },
-];
-
-export default function AboutPage() {
-  return (
-    <div className="flex flex-col min-h-screen bg-gray-50 text-gray-900">
+    <div className="flex min-h-screen flex-col bg-[#FAFAFA] text-stone-900 selection:bg-teal-900 selection:text-teal-50">
       <main className="flex-1">
-        {/* Hero */}
-        <section className="py-20 md:py-28 bg-white">
-          <div className="container mx-auto px-4 md:px-6 text-center">
-            <h1 className="text-4xl sm:text-5xl md:text-6xl font-bold">
-              Client & Developer Collaboration Platform
-            </h1>
-            <p className="mx-auto mt-4 max-w-3xl text-gray-600 md:text-lg">
-              A single-platform collaboration tool that replaced fragmented
-              email/chat processes and automated progress reporting — improving
-              transparency and reducing manual status updates.
-            </p>
-
-            <div className="flex justify-center gap-4 mt-8">
+        
+        {/* --- Hero Section --- */}
+        <section className="border-b border-stone-200 bg-white px-6 py-24 md:py-32">
+          <div className="mx-auto max-w-5xl text-center">
+            <motion.p 
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="mb-6 font-mono text-[11px] uppercase tracking-[0.3em] text-stone-400"
+            >
+              The Architecture
+            </motion.p>
+            <motion.h1 
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.1 }}
+              className="font-serif text-[clamp(40px,6vw,72px)] leading-[1.1] tracking-tight text-stone-950"
+            >
+              Engineering <em className="italic text-teal-800">momentum.</em>
+            </motion.h1>
+            <motion.p 
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.2 }}
+              className="mx-auto mt-8 max-w-2xl text-[16px] font-light leading-relaxed text-stone-500 md:text-[18px]"
+            >
+              A single-platform collaboration tool designed to replace fragmented 
+              email processes with automated reporting and enterprise-grade isolation.
+            </motion.p>
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              transition={{ delay: 0.3 }}
+              className="mt-12 flex justify-center"
+            >
               <Link
                 href="https://github.com/wahb-amir/dashboard"
                 target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center gap-2 px-6 py-3 bg-blue-600 text-white font-semibold rounded-md hover:bg-blue-700 transition"
+                className="group flex items-center gap-3 rounded-full bg-stone-950 px-8 py-4 text-[14px] font-medium text-stone-50 transition-colors hover:bg-teal-900"
               >
-                <span className="w-5 h-5">
-                  <FaGithub />
-                </span>
-                View Repo
+                <FaGithub className="text-[18px]" />
+                View Repository
+                <span className="text-stone-500 transition-transform group-hover:translate-x-1 group-hover:text-stone-50">↗</span>
               </Link>
+            </motion.div>
+          </div>
+        </section>
+
+        {/* --- Context Grid (Problem / Role) --- */}
+        <section className="border-b border-stone-200">
+          <div className="mx-auto grid max-w-6xl grid-cols-1 md:grid-cols-2">
+            <div className="border-b border-stone-200 p-8 md:border-b-0 md:border-r md:p-16">
+              <p className="mb-4 font-mono text-[10px] uppercase tracking-[0.2em] text-teal-700">[ the problem ]</p>
+              <h2 className="mb-6 font-serif text-[28px] text-stone-950">Fragile workflows.</h2>
+              <p className="text-[15px] font-light leading-relaxed text-stone-500">
+                Traditional projects relied on email and spreadsheets, leading to missed updates, 
+                unclear ownership, and constant status-check requests.
+              </p>
+            </div>
+            <div className="p-8 md:p-16">
+              <p className="mb-4 font-mono text-[10px] uppercase tracking-[0.2em] text-teal-700">[ the role ]</p>
+              <h2 className="mb-6 font-serif text-[28px] text-stone-950">Architect & Lead.</h2>
+              <p className="text-[15px] font-light leading-relaxed text-stone-500">
+                As the Full-Stack Engineer, I owned the end-to-end design of client workflows, 
+                GitHub integration, and CI/CD automation. Built to 100% 
+                TypeScript precision.
+              </p>
             </div>
           </div>
         </section>
 
-        <section className="py-12 md:py-16">
-          <div className="container mx-auto px-4 md:px-6 grid gap-6 md:grid-cols-2">
-            <Card>
-              <CardHeader>
-                <div className="inline-flex items-center justify-center w-12 h-12 rounded-md bg-blue-50 text-blue-600">
-                  <Briefcase className="w-5 h-5" />
+        {/* --- Key Features Grid --- */}
+        <section className="bg-white py-24">
+          <div className="mx-auto max-w-6xl px-6">
+            <div className="mb-16">
+              <p className="mb-2 font-mono text-[11px] uppercase tracking-[0.2em] text-stone-400">Capabilities</p>
+              <h2 className="font-serif text-[42px] tracking-tight">System features.</h2>
+            </div>
+            
+            <div className="grid grid-cols-1 gap-px bg-stone-200 sm:grid-cols-2 lg:grid-cols-4">
+              {features.map((f) => (
+                <div key={f.tag} className="bg-white p-8 transition-colors hover:bg-stone-50">
+                  <p className="mb-6 font-mono text-[10px] text-stone-400">{f.tag}</p>
+                  <f.icon className="mb-6 h-6 w-6 text-teal-800" strokeWidth={1.5} />
+                  <h3 className="mb-3 text-[16px] font-medium text-stone-900">{f.title}</h3>
+                  <p className="text-[13.5px] font-light leading-relaxed text-stone-500">{f.desc}</p>
                 </div>
-                <div>
-                  <CardTitle>Role</CardTitle>
-                  <p className="text-sm text-gray-600 mt-1">
-                    Full-Stack Engineer — owned end-to-end design and
-                    implementation of client & developer workflows, GitHub
-                    integration, and CI/CD automation.
-                  </p>
-                </div>
-              </CardHeader>
-            </Card>
-
-            <Card>
-              <CardHeader>
-                <div className="inline-flex items-center justify-center w-12 h-12 rounded-md bg-gray-100 text-gray-800">
-                  <CheckCircle className="w-5 h-5" />
-                </div>
-                <div>
-                  <CardTitle>Constraints</CardTitle>
-                  <p className="text-sm text-gray-600 mt-1">
-                    MVP in 8 weeks, role-based access, secure logins,
-                    enterprise-grade data isolation, limited budget for external
-                    integrations.
-                  </p>
-                </div>
-              </CardHeader>
-            </Card>
+              ))}
+            </div>
           </div>
         </section>
 
-        {/* Problem & Approach */}
-        <section className="py-12 md:py-16 bg-gray-50">
-          <div className="container mx-auto px-4 md:px-6 space-y-6">
-            <Card className="p-6">
-              <CardHeader>
-                <div className="inline-flex items-center justify-center w-12 h-12 rounded-md bg-red-50 text-red-600">
-                  <BarChart className="w-5 h-5" />
+        {/* --- Dark Section: Results --- */}
+        <section className="bg-stone-950 px-6 py-24 text-stone-50">
+          <div className="mx-auto max-w-6xl">
+            <div className="grid grid-cols-1 gap-16 lg:grid-cols-2 lg:items-center">
+              <div>
+                <p className="mb-4 font-mono text-[10px] uppercase tracking-[0.2em] text-teal-500">[ outcome ]</p>
+                <h2 className="mb-8 font-serif text-[42px] leading-tight">
+                  Quantifiable <br />
+                  <em className="italic text-stone-400">transparency.</em>
+                </h2>
+                <ul className="space-y-6">
+                  {[
+                    "Clearer visibility for clients with fewer status meetings.",
+                    "Elimination of manual update emails for developers.",
+                    "Single source of truth for all project activity.",
+                    "Automated GitHub progress reduced manual reporting overhead."
+                  ].map((item, i) => (
+                    <li key={i} className="flex items-start gap-4">
+                      <CheckCircle className="mt-1 h-4 w-4 text-teal-500" />
+                      <span className="text-[15px] font-light text-stone-300">{item}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+              <div className="rounded-2xl border border-stone-800 bg-stone-900/50 p-8 lg:p-12">
+                <p className="mb-6 font-mono text-[10px] uppercase tracking-[0.2em] text-stone-500">Constraint Analysis</p>
+                <div className="space-y-8">
+                  <div>
+                    <p className="text-[13px] font-medium text-stone-200">The Timeline</p>
+                    <p className="mt-1 text-[13px] font-light text-stone-500">MVP delivered in 8 weeks.</p>
+                  </div>
+                  <div>
+                    <p className="text-[13px] font-medium text-stone-200">The Security</p>
+                    <p className="mt-1 text-[13px] font-light text-stone-500">Role-based access and enterprise-grade data isolation.</p>
+                  </div>
+                  <div>
+                    <p className="text-[13px] font-medium text-stone-200">The Performance</p>
+                    <p className="mt-1 text-[13px] font-light text-stone-500">Optimized for Google Lighthouse scores of 90+.</p>
+                  </div>
                 </div>
-                <div>
-                  <CardTitle>Problem</CardTitle>
-                  <p className="text-sm text-gray-600 mt-1">
-                    Clients and developers relied on email, chat and
-                    spreadsheets to track work. This caused missed updates,
-                    unclear ownership, and frequent status-check requests.
-                  </p>
-                </div>
-              </CardHeader>
-            </Card>
-
-            <Card>
-              <CardHeader>
-                <div className="inline-flex items-center justify-center w-12 h-12 rounded-md bg-amber-50 text-amber-600">
-                  <GitCommit className="w-5 h-5" />
-                </div>
-                <div>
-                  <CardTitle>Approach</CardTitle>
-                  <ul className="mt-2 ml-5 list-disc text-sm text-gray-700 space-y-1">
-                    <li>
-                      Interviewed 5 users (clients & developers) to understand
-                      real pain points and workflow bottlenecks.
-                    </li>
-                    <li>
-                      Mapped user journeys for three key personas: client,
-                      manager, developer, to visualize interactions and
-                      responsibilities.
-                    </li>
-                    <li>
-                      Used AI tools to rapidly prototype UI and workflows,
-                      enabling quick validation of core concepts before
-                      development.
-                    </li>
-                    <li>
-                      Planned and prioritized the MVP: quotes, messaging,
-                      progress tracking, GitHub integration — focusing on
-                      automating the most painful manual steps first.
-                    </li>
-                    <li>
-                      Executed 1-week sprints with early pilot feedback from
-                      users, iterating quickly to refine functionality and UX.
-                    </li>
-                  </ul>
-                </div>
-              </CardHeader>
-            </Card>
-          </div>
-        </section>
-
-        {/* Features */}
-        <section className="py-12 md:py-16">
-          <div className="container mx-auto px-4 md:px-6">
-            <h2 className="text-2xl md:text-3xl font-bold text-center mb-8">
-              Key Features
-            </h2>
-
-            <ul className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3 max-w-6xl mx-auto">
-              {features.map((f, i) => {
-                const Icon = f.icon;
-                return (
-                  <li key={i} className="list-none">
-                    <Card className="h-full">
-                      <CardHeader>
-                        <div
-                          className={`inline-flex items-center justify-center w-12 h-12 rounded-lg ${
-                            f.colorClass ?? "bg-gray-100 text-gray-800"
-                          }`}
-                        >
-                          <Icon className="w-5 h-5" />
-                        </div>
-                        <div>
-                          <CardTitle>{f.title}</CardTitle>
-                        </div>
-                      </CardHeader>
-                      <CardContent>
-                        <p>{f.description}</p>
-                      </CardContent>
-                    </Card>
-                  </li>
-                );
-              })}
-            </ul>
-          </div>
-        </section>
-
-        {/* Outcome & Lessons */}
-        <section className="py-12 md:py-16 bg-gray-50">
-          <div className="container mx-auto px-4 md:px-6 grid gap-6 md:grid-cols-2">
-            <Card>
-              <CardHeader>
-                <div className="inline-flex items-center justify-center w-12 h-12 rounded-md bg-green-50 text-green-600">
-                  <CheckCircle className="w-5 h-5" />
-                </div>
-                <div>
-                  <CardTitle>Outcome / Results</CardTitle>
-                  <ul className="mt-2 ml-5 list-disc text-sm text-gray-700 space-y-1">
-                    <li>
-                      Clients reported clearer visibility and fewer status
-                      meetings
-                    </li>
-                    <li>Developers stopped manual update emails</li>
-                    <li>Single source of truth for all project activity</li>
-                    <li>
-                      Automated GitHub progress reduced manual reporting work
-                    </li>
-                  </ul>
-                </div>
-              </CardHeader>
-            </Card>
-
-            <Card>
-              <CardHeader>
-                <div className="inline-flex items-center justify-center w-12 h-12 rounded-md bg-indigo-50 text-indigo-600">
-                  <BarChart className="w-5 h-5" />
-                </div>
-                <div>
-                  <CardTitle>Lessons Learned</CardTitle>
-                  <ul className="mt-2 ml-5 list-disc text-sm text-gray-700 space-y-1">
-                    <li>
-                      Start with one core workflow and automate the worst manual
-                      step first
-                    </li>
-                    <li>
-                      Push heavy integrations (webhook processing) to background
-                      workers
-                    </li>
-                    <li>
-                      Distinguish client-view vs developer-view to reduce noise
-                    </li>
-                  </ul>
-                </div>
-              </CardHeader>
-            </Card>
+              </div>
+            </div>
           </div>
         </section>
       </main>
     </div>
   );
-}
+};
+
+export default AboutPage;

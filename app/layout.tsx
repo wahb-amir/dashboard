@@ -4,7 +4,7 @@ import { headers } from "next/headers";
 import "./globals.css";
 import Footer from "./components/Footer";
 import NavbarWrapper from "./components/Navbar/NavbarWrapper";
-
+import { ToastProvider } from "./components/toast/ToastProvider";
 const geistSans = Geist({
   variable: "--font-geist-sans",
   subsets: ["latin"],
@@ -31,8 +31,7 @@ export default async function RootLayout({ children }: RootLayoutProps) {
         <nav>
           <NavbarWrapper />
         </nav>
-
-        {children}
+        <ToastProvider position="top-right">{children}</ToastProvider>
 
         <Footer />
       </body>
